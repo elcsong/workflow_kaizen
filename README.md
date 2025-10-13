@@ -13,7 +13,7 @@ All projects here use general external data sources only—no company-internal d
 안녕하세요! 저는 "게으르지만 똑똑하게" 일하는 걸 모토로 사는 평범한 회사원이에요. 😎 대학교에서 전자공학을 전공했지만, 운명의 장난처럼 첫 직장에서 품질 업무에 빠져들었고, 지금까지 그 길을 걷고 있어요. 현재는 의료기기 회사 연구소에서 품질 담당자로 일하며, 매일매일 데이터와 씨름 중입니다. 전공과는 좀 다르지만, "필요는 발명의 어머니"라고 하잖아요? 그래서 혼자서 데이터 엔지니어링과 분석을 공부하며 Python을 무기로 삼았어요. (Python이 제 커피만큼 소중해요 ☕)
 
 ## 🚀 My Wild Journey
-전자공학 책만 들여다보던 대학생에서, 품질 체크리스트와 엑셀 시트로 가득한 사무실 생활로 변신! 하지만 반복되는 작업에 지쳐 "이걸 자동화하면 어떨까?" 생각이 들었어요. 그래서 Cursor AI를 만난 후, 제 삶이 바뀌었죠. 이제는 귀찮은 메뉴얼 작업을 자동화하고, 휴먼 에러를 잡아내는 '스마트 게으름뱅이'가 됐습니다. 비전공자지만, 필요에 따라 공부하며 여기까지 왔어요 – 데이터 분석, ETL, 자동화가 제 새로운 취미이자 무기예요!
+전자공학 책만 들여다보던 대학생에서, 품질 체크리스트와 엑셀 시트로 가득한 사무실 생활로 변신! 하지만 반복되는 작업에 지쳐 "이걸 자동화하면 어떨까?" 생각이 들었어요. 그래서 처음에는 엑셀을 그다음에 VBA 그리고 python pandas, matplotlib numpy를 만나 행복했다가 이제는는 Cursor AI를 만난 후, 제 삶이 바뀌었죠. 이제는 귀찮은 메뉴얼 작업을 자동화하고, 휴먼 에러를 잡아내는 '스마트 게으름뱅이'가 됐습니다. 비전공자지만, 필요에 따라 공부하며 여기까지 왔어요 – 데이터 분석, ETL, 자동화가 제 새로운 취미이자 무기예요!
 
 ## 💡 What I'm Obsessed With Right Now
 - **업무 자동화**: 반복 작업? No thanks! Cursor AI로 뚝딱 만들어 버려요. 시간 절약 + 에러 제로 = 행복 ↑
@@ -151,9 +151,10 @@ Note: This project is designed for easy transfer to another Windows PC (e.g., co
 - [ ] Add more example projects
 
 ## 📫 Contact
-- GitHub: [@LazyButSmart](https://github.com/LazyButSmart)
-- Email: (Optional - add if desired)
+- GitHub: [@elcsong](https://github.com/elcsong)
+- Email: haemyeome@icloud.com
 - LinkedIn: (Optional - add if desired)
 
 ## 📄 License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
