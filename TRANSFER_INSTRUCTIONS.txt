@@ -1,0 +1,56 @@
+
+# 프로젝트 전송 지침
+
+## 📋 전송 방법
+
+### 방법 1: 이메일 첨부 (25MB 이하)
+1. 이 ZIP 파일을 이메일로 첨부
+2. 회사 PC에서 다운로드 후 압축 해제
+
+### 방법 2: USB 메모리
+1. ZIP 파일을 USB에 복사
+2. 회사 PC에서 USB 연결 후 복사
+
+### 방법 3: 클라우드 스토리지
+1. OneDrive/Google Drive에 업로드
+2. 회사 PC에서 다운로드
+
+## 🚀 회사 PC 설치 과정
+
+1. 압축 해제
+   ```
+   # Windows 탐색기에서 우클릭 > 모두 추출
+   # 또는 PowerShell:
+   Expand-Archive -Path win_workflow_kaizen.zip -DestinationPath C:\
+   ```
+
+2. 가상환경 생성
+   ```
+   cd C:\win_workflow_kaizen
+   python -m venv kaizen-venv
+   kaizen-venv\Scripts\activate
+   ```
+
+3. 의존성 설치
+   ```
+   pip install -r requirements.txt
+   ```
+
+4. 환경 검증
+   ```
+   python config/windows_setup.py
+   ```
+
+## 📞 문제 해결
+
+문제 발생 시:
+1. `python config/windows_setup.py` 실행
+2. 로그 파일 확인: `logs/workflow_kaizen.log`
+3. README.md 참조
+
+## ⚠️ 주의사항
+
+- 회사 보안 정책 준수
+- 민감한 데이터 포함 금지
+- Python 3.8+ 필요
+- Microsoft Edge 브라우저 필요 (Windows 10/11)
