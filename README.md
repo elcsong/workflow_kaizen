@@ -140,15 +140,19 @@ Note: This project is designed for easy transfer to another Windows PC (e.g., co
 ### ✅ Completed
 - [x] Project initial structure setup
 - [x] README and documentation
+- [x] EU REACH 화학물질 데이터 ETL 파이프라인 구축
+- [x] 한국 KOSHA 산안법 특수관리물질 ETL 파이프라인 구축
+- [x] ETL 모듈 상세 문서화
 
 ### 🚧 In Progress
-- [ ] Develop data-scraping module
-- [ ] Build ETL pipeline module
+- [ ] Develop data-scraping module (웹 스크래핑 고도화)
+- [ ] Build additional ETL pipeline modules
 
 ### 📝 Planned
 - [ ] Create visualization dashboards
 - [ ] Expand automation tools
 - [ ] Add more example projects
+- [ ] API 기반 데이터 수집 모듈 개발
 
 ## 📫 Contact
 - GitHub: [@elcsong](https://github.com/elcsong)
