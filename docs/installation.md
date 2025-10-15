@@ -18,8 +18,11 @@ This guide covers setting up the project on a Windows machine. It's designed for
 2. **Create a Virtual Environment** (Highly recommended for isolation and portability)
    - Using venv:
      ```
-     python -m venv venv
-     .\venv\Scripts\activate
+     python -m venv kaizen-venv
+     # On Windows:
+     kaizen-venv\Scripts\activate
+     # On macOS/Linux:
+     source kaizen-venv/bin/activate
      ```
    - Using conda (if installed):
      ```

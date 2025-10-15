@@ -20,7 +20,7 @@ uvicorn>=0.24.0
 streamlit>=1.28.0
 
 # Database
-sqlite3  # Built-in with Python
+# sqlite3  # Built-in with Python (no installation needed)
 
 # Utilities
 python-dotenv>=1.0.0

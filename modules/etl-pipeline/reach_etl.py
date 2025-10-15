@@ -24,6 +24,10 @@ else:
     from selenium.webdriver.chrome.options import Options as ChromeOptions
     from selenium.webdriver.chrome.service import Service as ChromeService
 
+# WebDriver manager for automatic driver installation
+from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.microsoft import EdgeChromiumDriverManager
+
 # ECHA Annex base URLs and POST parameters
 ANNEX_CONFIG = {
     'svhc': {
@@ -160,46 +164,80 @@ def download_csv(annex_type):
 def _build_webdriver(download_dir: Path):
     """Create cross-platform WebDriver in headless mode with download directory configured."""
     system = platform.system()
-    
+
+    # Browser priority: Chrome first (cross-platform), then Edge on Windows
+    browser_configs = []
+
     if system == "Windows":
-        # Use Edge on Windows (target environment)
-        opts = EdgeOptions()
-        driver_class = webdriver.Edge
+        browser_configs = [
+            (ChromeOptions, webdriver.Chrome, "Chrome"),
+            (EdgeOptions, webdriver.Edge, "Edge")
+        ]
     else:
-        # Use Chrome on Mac/Linux (development environment)
-        opts = ChromeOptions()
-        driver_class = webdriver.Chrome
-    
-    # Common options for both browsers
-    opts.add_argument('--headless=new')
-    opts.add_argument('--disable-gpu')
-    opts.add_argument('--no-sandbox')
-    opts.add_argument('--disable-dev-shm-usage')
-    opts.add_argument('--disable-web-security')
-    opts.add_argument('--allow-running-insecure-content')
-    
-    # Ensure downloads go to the specified folder without prompts
-    download_path = str(download_dir.resolve())
-    prefs = {
-        'download.default_directory': download_path,
-        'download.prompt_for_download': False,
-        'download.directory_upgrade': True,
-        'safebrowsing.enabled': True,
-    }
-    opts.add_experimental_option('prefs', prefs)
-    
-    try:
-        driver = driver_class(options=opts)
-        # Force download behavior via CDP (Chromium-based browsers)
-        driver.execute_cdp_cmd('Page.setDownloadBehavior', {
-            'behavior': 'allow',
-            'downloadPath': download_path
-        })
-        return driver
-    except Exception as e:
-        print(f"WebDriver initialization failed: {e}")
-        print(f"Make sure {'Edge' if system == 'Windows' else 'Chrome'} WebDriver is installed")
-        raise
+        # Mac/Linux: Chrome primarily
+        browser_configs = [
+            (ChromeOptions, webdriver.Chrome, "Chrome")
+        ]
+
+    # Common options for all browsers
+    def setup_options(opts):
+        opts.add_argument('--headless=new')
+        opts.add_argument('--disable-gpu')
+        opts.add_argument('--no-sandbox')
+        opts.add_argument('--disable-dev-shm-usage')
+        opts.add_argument('--disable-web-security')
+        opts.add_argument('--allow-running-insecure-content')
+
+        # Ensure downloads go to the specified folder without prompts
+        download_path = str(download_dir.resolve())
+        prefs = {
+            'download.default_directory': download_path,
+            'download.prompt_for_download': False,
+            'download.directory_upgrade': True,
+            'safebrowsing.enabled': True,
+        }
+        opts.add_experimental_option('prefs', prefs)
+        return opts, download_path
+
+    # Try each browser configuration
+    last_error = None
+    for opts_class, driver_class, browser_name in browser_configs:
+        try:
+            opts, download_path = setup_options(opts_class())
+
+            # Set up service with webdriver-manager
+            if browser_name == "Chrome":
+                service = ChromeService(ChromeDriverManager().install())
+            elif browser_name == "Edge":
+                service = EdgeService(EdgeChromiumDriverManager().install())
+            else:
+                service = None
+
+            # Initialize driver with service if available
+            if service:
+                driver = driver_class(service=service, options=opts)
+            else:
+                driver = driver_class(options=opts)
+
+            # Force download behavior via CDP (Chromium-based browsers)
+            driver.execute_cdp_cmd('Page.setDownloadBehavior', {
+                'behavior': 'allow',
+                'downloadPath': download_path
+            })
+            print(f"Successfully initialized {browser_name} WebDriver")
+            return driver
+        except Exception as e:
+            last_error = e
+            print(f"{browser_name} WebDriver initialization failed: {e}")
+            continue
+
+    # All browsers failed
+    error_msg = f"All WebDriver initializations failed. Last error: {last_error}"
+    if system == "Windows":
+        error_msg += "\nMake sure Chrome or Edge WebDriver is installed. Try: pip install webdriver-manager"
+    else:
+        error_msg += "\nMake sure Chrome WebDriver is installed. Try: pip install webdriver-manager"
+    raise Exception(error_msg)
 
 
 def _wait_for_new_csv(download_dir: Path, before_files: set[str], timeout: int = 120) -> Path:
@@ -249,6 +287,19 @@ def download_csv_selenium(annex_type: str) -> str:
             'a[id$="exportButtonCSV"]',
             'button[title*="CSV"]',
         ]
+
+        # Handle disclaimer/terms acceptance first (required for ECHA)
+        try:
+            disclaimer_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.ID, '_viewsubstances_WAR_echarevsubstanceportlet_acceptDisclaimerButton'))
+            )
+            disclaimer_button.click()
+            print("Accepted disclaimer terms")
+            time.sleep(2)  # Wait for page to update after accepting terms
+        except TimeoutException:
+            print("No disclaimer button found or already accepted")
+        except Exception as e:
+            print(f"Error accepting disclaimer: {e}")
 
         # Handle potential cookie banner (best-effort)
         try:
@@ -310,8 +361,39 @@ def download_xml_selenium(annex_type: str) -> str:
 
         before_files = {p.name for p in download_dir.glob('*.xml')}
 
-        # Handle cookie banner and click button (reuse robust logic from CSV)
-        # ... (copy the cookie handling and robust selector logic from download_csv_selenium)
+        # Handle disclaimer/terms acceptance first (required for ECHA)
+        try:
+            disclaimer_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.ID, '_viewsubstances_WAR_echarevsubstanceportlet_acceptDisclaimerButton'))
+            )
+            disclaimer_button.click()
+            print("Accepted disclaimer terms")
+            time.sleep(2)  # Wait for page to update after accepting terms
+        except TimeoutException:
+            print("No disclaimer button found or already accepted")
+        except Exception as e:
+            print(f"Error accepting disclaimer: {e}")
+
+        # Handle potential cookie banner (best-effort)
+        try:
+            cookie_buttons = [
+                (By.CSS_SELECTOR, 'button#onetrust-accept-btn-handler'),
+                (By.CSS_SELECTOR, 'button[aria-label*="Accept"]'),
+                (By.XPATH, "//button[contains(translate(., 'ACEPT', 'acept'), 'accept') or contains(., 'Accept all')]")
+            ]
+            for by, sel in cookie_buttons:
+                try:
+                    el = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((by, sel)))
+                    el.click()
+                    break
+                except TimeoutException:
+                    continue
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Try to click XML export button
         clicked = False
         last_err = None
         selectors = [export_selector, 'button[id$="exportButtonXML"]', 'a[id$="exportButtonXML"]', 'button[title*="XML"]']
@@ -319,11 +401,20 @@ def download_xml_selenium(annex_type: str) -> str:
             try:
                 button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, sel)))
                 driver.execute_script('arguments[0].scrollIntoView({block:"center"});', button)
-                button.click()
+
+                # If button is not visible, try JavaScript click
+                if not button.is_displayed():
+                    print(f"Button not visible, trying JavaScript click for selector: {sel}")
+                    driver.execute_script('arguments[0].click();', button)
+                else:
+                    button.click()
+
                 clicked = True
+                print(f"Successfully clicked XML export button with selector: {sel}")
                 break
             except Exception as e:
                 last_err = e
+                print(f"Failed to click with selector {sel}: {e}")
                 continue
         if not clicked:
             raise last_err or RuntimeError('XML Export button not found')
@@ -379,73 +470,37 @@ def _read_csv_robust(path: str):
     return None
 
 def etl_process(annex_type, skip_download=False):
-    """ETL for a specific annex: Extract (POST download), Transform (Pandas), return as dict."""
-    # Extract
+    """ETL for a specific annex using XML only: Download via Selenium, parse XML, return as dict."""
     config = ANNEX_CONFIG.get(annex_type)
-    csv_file = f"data/{config['csv_filename']}"
     xml_file = f"data/{config['xml_filename']}"
+
+    # Extract: XML only
     if skip_download:
-        if not os.path.exists(csv_file):
-            raise FileNotFoundError(f"Existing CSV not found for {annex_type}: {csv_file}")
+        if not os.path.exists(xml_file):
+            raise FileNotFoundError(f"Existing XML not found for {annex_type}: {xml_file}")
     else:
-        # Prioritize XML download
-        try:
-            xml_file = download_xml_selenium(annex_type)
-            # Parse XML
-            tree = ET.parse(xml_file)
-            root = tree.getroot()
-            data = []
-            for row in root.findall('.//row'):
-                row_dict = {}
-                for col in row:
-                    key = col.tag.lower().replace(' ', '_')
-                    row_dict[key] = col.text.strip() if col.text else None
-                data.append(row_dict)
-            if not data:
-                raise ValueError(f"Empty XML for {annex_type}: {xml_file}")
-            metadata = {'annex_type': annex_type, 'item_count': len(data), 'source': config['base_url']}
-            return {'metadata': metadata, 'data': data}
-        except Exception as e:
-            print(f"XML processing failed for {annex_type}: {e}. Falling back to CSV...")
-        try:
-            csv_file = download_csv_selenium(annex_type)
-        except Exception as e:
-            print(f"Selenium export failed for {annex_type}: {e}. Falling back to HTTP POST...")
-    csv_file = download_csv(annex_type)
-    
-    # Transform - use robust CSV reading
-    df = _read_csv_robust(csv_file)
-    if df is None or df.empty:
-        raise ValueError(f"Failed to read or empty CSV for {annex_type}: {csv_file}")
-    
-    # Clean and standardize data
-    df = df.dropna(how='all')
-    df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_')
-    
-    # Handle potential duplicate columns (Windows vs Mac differences)
-    if 'ec_no.' in df.columns and 'ec_no' in df.columns:
-        df['ec_no.'] = df['ec_no.'].fillna(df['ec_no'])
-        df = df.drop('ec_no', axis=1)
-    if 'cas_no.' in df.columns and 'cas_no' in df.columns:
-        df['cas_no.'] = df['cas_no.'].fillna(df['cas_no'])
-        df = df.drop('cas_no', axis=1)
-    
-    # Remove duplicates if both columns exist
-    if 'ec_no.' in df.columns and 'cas_no.' in df.columns:
-        df = df.drop_duplicates(subset=['ec_no.', 'cas_no.'])
-    elif 'ec_no.' in df.columns:
-        df = df.drop_duplicates(subset=['ec_no.'])
-    elif 'cas_no.' in df.columns:
-        df = df.drop_duplicates(subset=['cas_no.'])
-    
-    # Basic type conversion example (if needed)
-    if 'date_of_inclusion' in df.columns:
-        df['date_of_inclusion'] = pd.to_datetime(df['date_of_inclusion'], errors='coerce')
-    
-    data_dict = df.to_dict(orient='records')
-    
-    metadata = {'annex_type': annex_type, 'item_count': len(data_dict), 'source': ANNEX_CONFIG[annex_type]['base_url']}
-    return {'metadata': metadata, 'data': data_dict}
+        xml_file = download_xml_selenium(annex_type)
+
+    # Transform: Parse XML
+    tree = ET.parse(xml_file)
+    root = tree.getroot()
+    data = []
+    for row in root.findall('.//result'):
+        row_dict = {}
+        for col in row:
+            key = col.tag.lower().replace(' ', '_').replace('.', '_')
+            row_dict[key] = col.text.strip() if col.text else None
+        data.append(row_dict)
+
+    if not data:
+        raise ValueError(f"Empty XML for {annex_type}: {xml_file}")
+
+    metadata = {
+        'annex_type': annex_type,
+        'item_count': len(data),
+        'source': config['base_url']
+    }
+    return {'metadata': metadata, 'data': data}
 
 def main():
     parser = argparse.ArgumentParser(description='REACH ETL Pipeline')
