@@ -7,6 +7,8 @@
 ## 📘 Project Overview
 Workflow Kaizen is my personal project for enhancing work efficiency through automation, ETL processes, and data analysis. The goal is to automate tedious manual tasks, reduce human errors, and speed up workflows using Python and AI tools like Cursor. This repository serves as a portfolio to showcase my self-taught skills in data engineering and automation.
 
+**🚀 Current Focus**: Building robust ETL pipelines for chemical safety data from international and domestic regulatory bodies, demonstrating end-to-end data engineering capabilities.
+
 All projects here use general external data sources only—no company-internal data is involved.
 
 ## 👋 Hey there, I'm LazyButSmart!
@@ -16,6 +18,7 @@ All projects here use general external data sources only—no company-internal d
 완전 비전공자에서 시작해서, 품질 체크리스트와 엑셀 시트로 가득한 사무실 생활로 변신! 하지만 반복되는 작업에 지쳐 "이걸 자동화하면 어떨까?" 생각이 들었어요. 그래서 처음에는 엑셀을 그다음에 VBA 그리고 python pandas, matplotlib numpy를 만나 행복했다가 이제는 Cursor AI를 만난 후, 제 삶이 바뀌었죠. 이제는 귀찮은 메뉴얼 작업을 자동화하고, 휴먼 에러를 잡아내는 '스마트 게으름뱅이'가 됐습니다. 비전공자지만, 필요에 따라 공부하며 여기까지 왔어요 – 데이터 분석, ETL, 자동화가 제 새로운 취미이자 무기예요!
 
 ## 💡 What I'm Obsessed With Right Now
+- **ETL 파이프라인 구축**: EU REACH와 한국 산안법 화학물질 데이터를 자동으로 수집하고 표준화하는 강력한 파이프라인 개발 중! 🧪
 - **업무 자동화**: 반복 작업? No thanks! Cursor AI로 뚝딱 만들어 버려요. 시간 절약 + 에러 제로 = 행복 ↑
 - **데이터 마법**: 외부 데이터 스크래핑해서 ETL로 정리, 대시보드에 뿌려 분석! (회사 비밀 자료는 절대 안 써요, 오직 일반 자료만 🛡️)
 - **품질 업그레이드**: 속도 향상과 실수 줄이기 – 제 업무를 '카이젠'하는 데 집중 중이에요.
@@ -35,7 +38,9 @@ All projects here use general external data sources only—no company-internal d
 
 ### Automation & ETL
 - **Task Automation**: Python Scripts, Batch Processing
-- **Data Pipeline**: Custom ETL Scripts
+- **Data Pipeline**: Custom ETL Scripts (EU REACH, KOSHA)
+- **Web Scraping**: Selenium, BeautifulSoup, Requests
+- **Data Formats**: XML, JSON, Excel (openpyxl, xlrd)
 - **Scheduling**: Windows Task Scheduler, Cron (필요시)
 
 ### Development Environment
@@ -54,52 +59,72 @@ workflow-kaizen/
 ├── README.md
 ├── requirements.txt
 ├── .gitignore
-├── .env.example
 ├── LICENSE
+├── TRANSFER_INSTRUCTIONS.txt
+├── win_workflow_kaizen_transfer.zip
 ├── docs/
 │   ├── installation.md
-│   └── usage.md
+│   ├── transfer-installation.md
+│   ├── usage.md
+│   └── windows_installation.md
 ├── modules/
-│   ├── data-scraping/
-│   │   ├── __init__.py
-│   │   ├── web-scraper.py
-│   │   ├── data-cleaner.py
-│   │   └── README.md
-│   ├── etl-pipeline/
-│   │   ├── __init__.py
-│   │   ├── extractor.py
-│   │   ├── transformer.py
-│   │   ├── loader.py
-│   │   └── README.md
-│   ├── automation/
-│   │   ├── __init__.py
-│   │   ├── file-processor.py
-│   │   ├── report-generator.py
-│   │   └── README.md
-│   ├── visualization/
-│   │   ├── __init__.py
-│   │   ├── dashboard.py
-│   │   ├── chart-generator.py
-│   │   └── README.md
-│   └── utils/
-│       ├── __init__.py
-│       ├── database-connector.py
-│       ├── config-manager.py
-│       └── common-functions.py
-├── projects/
-│   ├── project-1/
-│   │   ├── main.py
-│   │   ├── config.py
-│   │   └── README.md
-│   ├── project-2/
-│   │   ├── main.py
-│   │   ├── config.py
-│   │   └── README.md
-│   └── ...
+│   └── etl-pipeline/
+│       ├── ETL_Modules_Documentation.md
+│       ├── reach_etl.py          # EU REACH 데이터 ETL 모듈
+│       └── kosha_etl.py          # 한국 KOSHA 데이터 ETL 모듈
+├── data/
+│   ├── json/
+│   │   ├── reach_data.json       # EU REACH 수집 데이터
+│   │   └── kosha_special_materials.json  # KOSHA 수집 데이터
+│   ├── downloads/
+│   ├── sqlite/
+│   ├── authorisation-list-export.xml
+│   ├── candidate-list-of-svhc-for-authorisation-export.xml
+│   └── restriction-list-export.xml
+├── config/
+│   └── windows_setup.py
+├── scripts/
+│   └── prepare_transfer.py
+├── logs/
+├── kaizen-venv/                  # Python 가상환경 (개발용)
 └── tests/
     ├── test_modules/
     └── test_projects/
 ```
+
+## 🚀 Featured ETL Modules
+
+### EU REACH 데이터 ETL 파이프라인
+**파일**: `modules/etl-pipeline/reach_etl.py`
+- **목적**: EU 화학물질 규제 데이터 자동 수집
+- **대상 데이터**: SVHC, Annex XIV, Annex XVII 목록
+- **기술**: Selenium 웹 자동화, XML 파싱
+- **출력**: `data/json/reach_data.json`
+
+```bash
+# EU REACH 데이터 수집
+python modules/etl-pipeline/reach_etl.py
+
+# 기존 데이터로 테스트
+python modules/etl-pipeline/reach_etl.py --skip-download
+```
+
+### 한국 KOSHA 산안법 ETL 파이프라인
+**파일**: `modules/etl-pipeline/kosha_etl.py`
+- **목적**: 한국 산업안전보건법 특수관리물질 데이터 수집
+- **대상 데이터**: 특수관리물질, 유해화학물질 목록
+- **기술**: 다중 데이터 소스 (API, 웹스크래핑, 샘플 데이터)
+- **출력**: `data/json/kosha_special_materials.json`
+
+```bash
+# 한국 특수관리물질 데이터 수집 (샘플 데이터)
+python modules/etl-pipeline/kosha_etl.py --data-type special_materials --skip-download
+
+# 다른 데이터 타입 선택
+python modules/etl-pipeline/kosha_etl.py --data-type hazardous_materials
+```
+
+**📖 상세 문서**: [`modules/etl-pipeline/ETL_Modules_Documentation.md`](modules/etl-pipeline/ETL_Modules_Documentation.md)
 
 ## 🔧 Technical Features
 ### Code Quality & Management
@@ -127,12 +152,40 @@ workflow-kaizen/
 - **Learning Acceleration**: 새로운 기술의 빠른 습득
 
 ## ⚙️ Setup & Installation
-For detailed instructions, see [docs/installation.md](docs/installation.md). Key points:
-- Clone the repo.
-- Create a virtual environment (highly recommended for portability to company PC).
-- Install dependencies via `pip install -r requirements.txt`.
-- Copy `.env.example` to `.env` and fill in your values.
-- Test in your environment to ensure no conflicts.
+
+For detailed instructions, see [docs/installation.md](docs/installation.md).
+
+### Quick Start
+```bash
+# 1. 레포지토리 클론
+git clone https://github.com/elcsong/workflow_kaizen.git
+cd workflow-kaizen
+
+# 2. 가상환경 생성 (권장)
+python -m venv kaizen-venv
+source kaizen-venv/bin/activate  # Linux/Mac
+# 또는 kaizen-venv\Scripts\activate  # Windows
+
+# 3. 의존성 설치
+pip install -r requirements.txt
+
+# 4. ETL 모듈 테스트 실행
+python modules/etl-pipeline/reach_etl.py --skip-download
+python modules/etl-pipeline/kosha_etl.py --data-type special_materials --skip-download
+```
+
+### ETL 모듈 실행 예시
+```bash
+# EU REACH 데이터 수집 (실제 웹사이트에서)
+python modules/etl-pipeline/reach_etl.py
+
+# 한국 특수관리물질 데이터 수집 (샘플 데이터)
+python modules/etl-pipeline/kosha_etl.py --data-type special_materials --skip-download
+
+# 결과 확인
+cat data/json/reach_data.json | head -20
+cat data/json/kosha_special_materials.json | head -20
+```
 
 Note: This project is designed for easy transfer to another Windows PC (e.g., company computer). Use virtual environments to avoid system-wide conflicts.
 
