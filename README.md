@@ -19,6 +19,7 @@ All projects here use general external data sources only—no company-internal d
 
 ## 💡 What I'm Obsessed With Right Now
 - **ETL 파이프라인 구축**: EU REACH와 한국 산안법 화학물질 데이터를 자동으로 수집하고 표준화하는 강력한 파이프라인 개발 중! 🧪
+- **데이터 시각화 대시보드**: ETL로 수집한 데이터를 Streamlit으로 아름다운 대시보드로 시각화! 📊
 - **업무 자동화**: 반복 작업? No thanks! Cursor AI로 뚝딱 만들어 버려요. 시간 절약 + 에러 제로 = 행복 ↑
 - **데이터 마법**: 외부 데이터 스크래핑해서 ETL로 정리, 대시보드에 뿌려 분석! (회사 비밀 자료는 절대 안 써요, 오직 일반 자료만 🛡️)
 - **품질 업그레이드**: 속도 향상과 실수 줄이기 – 제 업무를 '카이젠'하는 데 집중 중이에요.
@@ -42,6 +43,12 @@ All projects here use general external data sources only—no company-internal d
 - **Web Scraping**: Selenium, BeautifulSoup, Requests
 - **Data Formats**: XML, JSON, Excel (openpyxl, xlrd)
 - **Scheduling**: Windows Task Scheduler, Cron (필요시)
+
+### Data Visualization & Dashboard
+- **Web Framework**: Streamlit (대시보드)
+- **Interactive Charts**: Plotly, Plotly Express
+- **Data Tables**: Streamlit DataFrames
+- **Export Features**: CSV, Excel 다운로드
 
 ### Development Environment
 - **IDE**: Cursor AI
@@ -68,10 +75,13 @@ workflow-kaizen/
 │   ├── usage.md
 │   └── windows_installation.md
 ├── modules/
-│   └── etl-pipeline/
-│       ├── ETL_Modules_Documentation.md
-│       ├── reach_etl.py          # EU REACH 데이터 ETL 모듈
-│       └── kosha_etl.py          # 한국 KOSHA 데이터 ETL 모듈
+│   ├── etl-pipeline/
+│   │   ├── ETL_Modules_Documentation.md
+│   │   ├── reach_etl.py          # EU REACH 데이터 ETL 모듈
+│   │   └── kosha_etl.py          # 한국 KOSHA 데이터 ETL 모듈
+│   └── visualization/
+│       ├── __init__.py
+│       └── dashboard.py           # Streamlit ETL 데이터 대시보드
 ├── data/
 │   ├── json/
 │   │   ├── reach_data.json       # EU REACH 수집 데이터
@@ -183,8 +193,17 @@ python modules/etl-pipeline/reach_etl.py
 python modules/etl-pipeline/kosha_etl.py --data-type special_materials --skip-download
 
 # 결과 확인
-cat data/json/reach_data.json | head -20
-cat data/json/kosha_special_materials.json | head -20
+cat data/reach_data.json | head -20
+cat data/kosha_special_materials.json | head -20
+```
+
+### 대시보드 실행
+```bash
+# ETL 데이터 대시보드 실행 (브라우저에서 http://localhost:8501)
+streamlit run modules/visualization/dashboard.py
+
+# 특정 포트에서 실행
+streamlit run modules/visualization/dashboard.py --server.port 8502
 ```
 
 Note: This project is designed for easy transfer to another Windows PC (e.g., company computer). Use virtual environments to avoid system-wide conflicts.
@@ -196,6 +215,7 @@ Note: This project is designed for easy transfer to another Windows PC (e.g., co
 - [x] EU REACH 화학물질 데이터 ETL 파이프라인 구축
 - [x] 한국 KOSHA 산안법 특수관리물질 ETL 파이프라인 구축
 - [x] ETL 모듈 상세 문서화
+- [x] Streamlit 대시보드 개발 (ETL 데이터 시각화)
 
 ### 🚧 In Progress
 - [ ] Develop data-scraping module (웹 스크래핑 고도화)
