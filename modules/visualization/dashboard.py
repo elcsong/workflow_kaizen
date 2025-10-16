@@ -27,7 +27,7 @@ st.set_page_config(
 # 데이터 경로 설정
 DATA_DIR = Path(__file__).parent.parent.parent / "data"
 REACH_DATA_FILE = DATA_DIR / "reach_data.json"
-KOSHA_DATA_FILE = DATA_DIR / "kosha_special_materials.json"
+KOSHA_DATA_FILE = DATA_DIR / "kosha_data.json"
 
 def load_reach_data() -> Dict[str, Any]:
     """EU REACH 데이터를 로드합니다."""
