@@ -183,7 +183,10 @@ def display_data_summary(df: pd.DataFrame, title: str):
         st.metric("총 항목 수", len(df))
 
     with col2:
-        st.metric("고유 물질 수", df.get('Substance Name', df.get('물질명', df.columns[0])).nunique() if len(df) > 0 else 0)
+        # 물질명을 나타내는 컬럼 찾기
+        substance_series = df.get('Substance Name') or df.get('물질명') or (df.iloc[:, 0] if len(df.columns) > 0 else None)
+        unique_count = substance_series.nunique() if substance_series is not None and len(df) > 0 else 0
+        st.metric("고유 물질 수", unique_count)
 
     with col3:
         cas_col = None
