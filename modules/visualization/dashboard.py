@@ -91,8 +91,7 @@ def load_kosha_data() -> Dict[str, Any]:
             st.warning("🇰🇷 KOSHA 데이터 파일이 없습니다.")
             st.info("💡 현재 한국 산안법 데이터는 샘플 데이터 기반입니다.")
             st.info("💡 법령정보시스템 복구 후 실제 데이터를 수집할 예정입니다.")
-            st.code("# 향후 사용 예정
-python modules/etl-pipeline/kosha_etl.py --data-type special_materials")
+            st.code("# 향후 사용 예정\npython modules/etl-pipeline/kosha_etl.py --data-type special_materials")
             return {}
 
         # 파일 크기 확인
