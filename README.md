@@ -227,6 +227,19 @@ Note: This project is designed for easy transfer to another Windows PC (e.g., co
 - [ ] Add more example projects
 - [ ] API 기반 데이터 수집 모듈 개발
 
+### 🔮 향후 개선 아이템 (법령정보 시스템 복구 후)
+#### PDF 문서 기반 데이터 추출 모듈
+**배경**: 현재 법령정보시스템 화재로 인한 접근 불가 (2025년 현재)
+- **대상 문서 1**: 작업환경측정 대상 유해인자 (산업안전보건법 제186조제1항 관련)
+- **대상 문서 2**: 산업안전보건기준에 관한 규칙 [별표 12] 관리대상 유해물질의 종류
+
+**구현 계획**:
+- PDF 다운로드 자동화 모듈 개발
+- PDF 표 데이터 추출 및 구조화
+- 물질명, CAS번호, 특별관리물질 여부 구분 로직
+- JSON 데이터베이스 형태로 저장
+- 기존 ETL 파이프라인과 통합
+
 ## 📫 Contact
 - GitHub: [@elcsong](https://github.com/elcsong)
 - Email: haemyeome@icloud.com

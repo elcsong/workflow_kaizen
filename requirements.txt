@@ -19,6 +19,12 @@ fastapi>=0.104.0
 uvicorn>=0.24.0
 streamlit>=1.28.0
 
+# PDF processing libraries (향후 법령정보시스템 PDF 파싱용)
+pdfplumber>=0.9.0
+tabula-py>=2.8.0
+PyPDF2>=3.0.0
+camelot-py[cv]>=0.10.1
+
 # Database
 # sqlite3  # Built-in with Python (no installation needed)
 
