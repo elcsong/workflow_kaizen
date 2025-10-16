@@ -416,75 +416,31 @@ def _read_excel_robust(path: str) -> pd.DataFrame:
 
     raise ValueError(f"Could not read Excel file: {path}")
 
-def _get_sample_special_materials_data():
-    """Get sample Korean special management substances data for testing."""
-    # Based on Korean Occupational Safety and Health Act (산업안전보건법)
-    # These are representative examples - actual data should be sourced from official KOSHA/MOEL publications
-    sample_data = [
-        {
-            '물질명': '벤젠',
-            '영문명': 'Benzene',
-            'CAS_No': '71-43-2',
-            '관리기준': '피부흡수방지, 호흡기보호구 착용',
-            '관리방법': '노출한계: 1ppm, 생물학적노출지표 모니터링',
-            '비고': '발암성 물질'
-        },
-        {
-            '물질명': '톨루엔',
-            '영문명': 'Toluene',
-            'CAS_No': '108-88-3',
-            '관리기준': '환기설비 설치, 개인보호구 착용',
-            '관리방법': '노출한계: 50ppm, 건강진단 실시',
-            '비고': '신경계 영향 물질'
-        },
-        {
-            '물질명': '포름알데히드',
-            '영문명': 'Formaldehyde',
-            'CAS_No': '50-00-0',
-            '관리기준': '국소배기장치 설치',
-            '관리방법': '노출한계: 0.5ppm, 작업환경측정',
-            '비고': '알레르기 유발 물질'
-        },
-        {
-            '물질명': '아스베스토스',
-            '영문명': 'Asbestos',
-            'CAS_No': '1332-21-4',
-            '관리기준': '사용금지, 대체재 사용',
-            '관리방법': '작업장 내 사용 전면 금지',
-            '비고': '발암성 광물 섬유'
-        },
-        {
-            '물질명': '납',
-            '영문명': 'Lead',
-            'CAS_No': '7439-92-1',
-            '관리기준': '노출저감, 생물학적 모니터링',
-            '관리방법': '혈중 납 농도 모니터링',
-            '비고': '신경계 및 생식계 독성'
-        }
-    ]
-    return sample_data
 
 def etl_process_kosha(data_type: str, skip_download: bool = False) -> dict:
     """ETL process for KOSHA data."""
-    config = KOSHA_CONFIG.get(data_type)
+    import logging
 
-    # For testing/development: use sample data for special_materials
-    if data_type == 'special_materials' and skip_download:
-        print("Using sample data for special_materials (development mode)")
-        sample_data = _get_sample_special_materials_data()
-        metadata = {
-            'data_type': data_type,
-            'source': 'sample_data',
-            'item_count': len(sample_data),
-            'note': 'This is sample data for development. Replace with actual data extraction.',
-            'config': config
-        }
-        return {'metadata': metadata, 'data': sample_data}
+    # 로깅 설정
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+    logger = logging.getLogger(__name__)
+
+    config = KOSHA_CONFIG.get(data_type)
+    logger.info(f"Starting ETL process for {data_type}")
+
+    if not config:
+        error_msg = f"Unknown data type: {data_type}"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
 
     # Try API first
+    logger.info("Attempting API data extraction")
     api_data = try_api_extraction(data_type)
     if api_data:
-        print(f"Successfully extracted data from API: {api_data['endpoint']}")
+        logger.info(f"Successfully extracted data from API: {api_data['endpoint']}")
         # Process API data (JSON or XML)
         if isinstance(api_data['data'], dict):
             data = api_data['data']
@@ -507,10 +463,13 @@ def etl_process_kosha(data_type: str, skip_download: bool = False) -> dict:
             'item_count': len(data) if isinstance(data, list) else 'N/A',
             'api_endpoint': api_data['endpoint']
         }
+        logger.info(f"API extraction completed. Items: {metadata['item_count']}")
         return {'metadata': metadata, 'data': data}
+    else:
+        logger.warning("API extraction failed, no data returned")
 
     # Fallback to web scraping
-    print("API extraction failed, trying web scraping...")
+    logger.info("API extraction failed, attempting web scraping")
     try:
         search_results = search_kosha_data(data_type)
 
@@ -520,38 +479,39 @@ def etl_process_kosha(data_type: str, skip_download: bool = False) -> dict:
         download_dir = Path('data')
         driver = _build_webdriver(download_dir)
         try:
+            logger.info(f"Processing {len(search_results['search_results'])} search results")
+
             for result in search_results['search_results']:
                 if result['type'] == 'download_link':
                     try:
+                        logger.info(f"Attempting to download Excel from: {result['url']}")
                         excel_path = download_excel_from_link(driver, result['url'], download_dir)
                         df = _read_excel_robust(excel_path)
                         processed_data.extend(df.to_dict('records'))
                         data_found = True
-                        print(f"Extracted {len(df)} records from Excel file")
+                        logger.info(f"Successfully extracted {len(df)} records from Excel file")
                     except Exception as e:
-                        print(f"Failed to download/process Excel: {e}")
+                        logger.error(f"Failed to download/process Excel: {e}")
                         continue
 
                 elif result['type'] == 'data_table':
                     try:
-                        driver.get(result.get('source_url', search_results['config']['data_url']))
+                        source_url = result.get('source_url', search_results['config']['data_url'])
+                        logger.info(f"Attempting to extract table data from: {source_url}")
+                        driver.get(source_url)
                         df = extract_table_data(driver)
                         if not df.empty:
                             processed_data.extend(df.to_dict('records'))
                             data_found = True
-                            print(f"Extracted {len(df)} records from HTML table")
+                            logger.info(f"Successfully extracted {len(df)} records from HTML table")
                     except Exception as e:
-                        print(f"Failed to extract table data: {e}")
+                        logger.error(f"Failed to extract table data: {e}")
                         continue
 
             if not data_found:
-                print(f"No web data found for {data_type}, using sample data for development")
-                if data_type == 'special_materials':
-                    processed_data = _get_sample_special_materials_data()
-                    data_found = True
-
-            if not data_found:
-                raise ValueError(f"No data found for {data_type}")
+                error_msg = f"No data found for {data_type} from web scraping"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
 
             metadata = {
                 'data_type': data_type,
@@ -560,28 +520,15 @@ def etl_process_kosha(data_type: str, skip_download: bool = False) -> dict:
                 'config': config
             }
 
+            logger.info(f"Web scraping completed successfully. Total items: {len(processed_data)}")
             return {'metadata': metadata, 'data': processed_data}
 
         finally:
             driver.quit()
 
     except Exception as e:
-        print(f"Web scraping failed: {e}")
-        # Final fallback: use sample data for special_materials
-        if data_type == 'special_materials':
-            print("Using sample data as final fallback")
-            sample_data = _get_sample_special_materials_data()
-            metadata = {
-                'data_type': data_type,
-                'source': 'sample_data_fallback',
-                'item_count': len(sample_data),
-                'error': str(e),
-                'note': 'Sample data used due to extraction failure. Update with real data sources.',
-                'config': config
-            }
-            return {'metadata': metadata, 'data': sample_data}
-        else:
-            raise
+        logger.error(f"Web scraping failed: {e}")
+        raise
 
 def main():
     parser = argparse.ArgumentParser(description='KOSHA ETL Pipeline for Korean Chemical Safety Data')
