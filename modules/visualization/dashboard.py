@@ -32,25 +32,104 @@ KOSHA_DATA_FILE = DATA_DIR / "kosha_data.json"
 def load_reach_data() -> Dict[str, Any]:
     """EU REACH 데이터를 로드합니다."""
     try:
+        # 파일 존재 및 크기 확인
+        if not REACH_DATA_FILE.exists():
+            st.error(f"REACH 데이터 파일을 찾을 수 없습니다: {REACH_DATA_FILE}")
+            st.info("💡 EU REACH 데이터를 수집하려면 다음 명령을 실행하세요:")
+            st.code("python modules/etl-pipeline/reach_etl.py --skip-download")
+            return {}
+
+        # 파일 크기 확인 (너무 작은 파일은 오류)
+        file_size = REACH_DATA_FILE.stat().st_size
+        if file_size < 10:  # 10바이트 미만은 비정상
+            st.error(f"REACH 데이터 파일이 너무 작거나 손상되었습니다: {file_size} bytes")
+            st.info("💡 데이터를 다시 생성하려면 다음 명령을 실행하세요:")
+            st.code("python modules/etl-pipeline/reach_etl.py --skip-download")
+            return {}
+
         with open(REACH_DATA_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        st.error(f"REACH 데이터 파일을 찾을 수 없습니다: {REACH_DATA_FILE}")
+            content = f.read().strip()
+            if not content:
+                st.error("REACH 데이터 파일이 비어있습니다.")
+                return {}
+
+            data = json.loads(content)
+
+            # 데이터 구조 검증
+            if not isinstance(data, dict):
+                st.error("REACH 데이터 형식이 올바르지 않습니다 (dict 타입이 아님).")
+                return {}
+
+            # 필수 키 확인
+            expected_keys = ['svhc', 'annex_xiv', 'annex_xvii']
+            found_keys = [key for key in expected_keys if key in data]
+            if not found_keys:
+                st.error("REACH 데이터에 필요한 카테고리가 없습니다.")
+                return {}
+
+            st.success(f"✅ REACH 데이터 로드 완료: {len(found_keys)}개 카테고리")
+            return data
+
+    except json.JSONDecodeError as e:
+        st.error(f"REACH 데이터 JSON 파싱 오류: {e}")
+        st.info("💡 파일이 손상되었을 수 있습니다. 다음 명령으로 재생성하세요:")
+        st.code("python modules/etl-pipeline/reach_etl.py --skip-download")
+        return {}
+    except UnicodeDecodeError as e:
+        st.error(f"REACH 데이터 파일 인코딩 오류: {e}")
+        st.info("💡 UTF-8 인코딩으로 파일을 다시 생성하세요.")
         return {}
     except Exception as e:
-        st.error(f"REACH 데이터 로드 중 오류 발생: {e}")
+        st.error(f"REACH 데이터 로드 중 예상치 못한 오류 발생: {e}")
         return {}
 
 def load_kosha_data() -> Dict[str, Any]:
     """한국 KOSHA 데이터를 로드합니다."""
     try:
+        # 파일 존재 확인
+        if not KOSHA_DATA_FILE.exists():
+            st.warning("🇰🇷 KOSHA 데이터 파일이 없습니다.")
+            st.info("💡 현재 한국 산안법 데이터는 샘플 데이터 기반입니다.")
+            st.info("💡 법령정보시스템 복구 후 실제 데이터를 수집할 예정입니다.")
+            st.code("# 향후 사용 예정
+python modules/etl-pipeline/kosha_etl.py --data-type special_materials")
+            return {}
+
+        # 파일 크기 확인
+        file_size = KOSHA_DATA_FILE.stat().st_size
+        if file_size < 10:  # 10바이트 미만은 비정상
+            st.error(f"KOSHA 데이터 파일이 너무 작거나 손상되었습니다: {file_size} bytes")
+            return {}
+
         with open(KOSHA_DATA_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        st.error(f"KOSHA 데이터 파일을 찾을 수 없습니다: {KOSHA_DATA_FILE}")
+            content = f.read().strip()
+            if not content:
+                st.error("KOSHA 데이터 파일이 비어있습니다.")
+                return {}
+
+            data = json.loads(content)
+
+            # 데이터 구조 검증
+            if not isinstance(data, dict):
+                st.error("KOSHA 데이터 형식이 올바르지 않습니다 (dict 타입이 아님).")
+                return {}
+
+            # 메타데이터 확인
+            if 'metadata' not in data:
+                st.error("KOSHA 데이터에 메타데이터가 없습니다.")
+                return {}
+
+            st.success("✅ KOSHA 데이터 로드 완료 (샘플 데이터)")
+            return data
+
+    except json.JSONDecodeError as e:
+        st.error(f"KOSHA 데이터 JSON 파싱 오류: {e}")
+        return {}
+    except UnicodeDecodeError as e:
+        st.error(f"KOSHA 데이터 파일 인코딩 오류: {e}")
         return {}
     except Exception as e:
-        st.error(f"KOSHA 데이터 로드 중 오류 발생: {e}")
+        st.error(f"KOSHA 데이터 로드 중 예상치 못한 오류 발생: {e}")
         return {}
 
 def flatten_reach_data(reach_data: Dict[str, Any]) -> pd.DataFrame:
