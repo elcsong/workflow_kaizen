@@ -18,7 +18,8 @@ All projects here use general external data sources only—no company-internal d
 완전 비전공자에서 시작해서, 품질 체크리스트와 엑셀 시트로 가득한 사무실 생활로 변신! 하지만 반복되는 작업에 지쳐 "이걸 자동화하면 어떨까?" 생각이 들었어요. 그래서 처음에는 엑셀을 그다음에 VBA 그리고 python pandas, matplotlib numpy를 만나 행복했다가 이제는 Cursor AI를 만난 후, 제 삶이 바뀌었죠. 이제는 귀찮은 메뉴얼 작업을 자동화하고, 휴먼 에러를 잡아내는 '스마트 게으름뱅이'가 됐습니다. 비전공자지만, 필요에 따라 공부하며 여기까지 왔어요 – 데이터 분석, ETL, 자동화가 제 새로운 취미이자 무기예요!
 
 ## 💡 What I'm Obsessed With Right Now
-- **ETL 파이프라인 구축**: EU REACH와 한국 산안법 화학물질 데이터를 자동으로 수집하고 표준화하는 강력한 파이프라인 개발 중! 🧪
+- **ETL 파이프라인 구축**: IEC62474, EU REACH, 한국 산안법 등 글로벌 화학물질 규제 데이터를 자동으로 수집하고 표준화하는 강력한 파이프라인 개발 중! 🧪
+- **통합 규제 관리**: RoHS, REACH, GADSL, Conflict Minerals 등 400개 이상의 선언 가능 물질을 단일 시스템에서 관리! 🌍
 - **데이터 시각화 대시보드**: ETL로 수집한 데이터를 Streamlit으로 아름다운 대시보드로 시각화! 📊
 - **업무 자동화**: 반복 작업? No thanks! Cursor AI로 뚝딱 만들어 버려요. 시간 절약 + 에러 제로 = 행복 ↑
 - **데이터 마법**: 외부 데이터 스크래핑해서 ETL로 정리, 대시보드에 뿌려 분석! (회사 비밀 자료는 절대 안 써요, 오직 일반 자료만 🛡️)
@@ -77,15 +78,17 @@ workflow-kaizen/
 ├── modules/
 │   ├── etl-pipeline/
 │   │   ├── ETL_Modules_Documentation.md
+│   │   ├── iec62474_etl.py       # IEC62474 물질 선언 표준 ETL 모듈 ⭐ NEW
 │   │   ├── reach_etl.py          # EU REACH 데이터 ETL 모듈
 │   │   └── kosha_etl.py          # 한국 KOSHA 데이터 ETL 모듈
 │   └── visualization/
 │       ├── __init__.py
 │       └── dashboard.py           # Streamlit ETL 데이터 대시보드
 ├── data/
-│   ├── json/
-│   │   ├── reach_data.json       # EU REACH 수집 데이터
-│   │   └── kosha_special_materials.json  # KOSHA 수집 데이터
+│   ├── iec62474_substances.json  # IEC62474 수집 데이터 (RoHS, REACH, GADSL 등 통합) ⭐ NEW
+│   ├── reach_data.json           # EU REACH 수집 데이터
+│   ├── kosha_special_materials.json  # KOSHA 수집 데이터 (생성 시)
+│   ├── json/                     # 기타 JSON 파일
 │   ├── downloads/
 │   ├── sqlite/
 │   ├── authorisation-list-export.xml
@@ -103,6 +106,24 @@ workflow-kaizen/
 ```
 
 ## 🚀 Featured ETL Modules
+
+### ⭐ IEC62474 통합 물질 선언 ETL 파이프라인 (NEW!)
+**파일**: `modules/etl-pipeline/iec62474_etl.py`
+- **목적**: 국제 표준 IEC62474 물질 선언 데이터베이스 자동 수집
+- **통합 규제**: RoHS, REACH (SVHC, Annex XIV, XVII), GADSL, Conflict Minerals, TSCA, POPs, Prop 65
+- **물질 범위**: 400개 이상의 선언 가능 물질 (기존 RoHS 10개 → 400개 이상으로 확장!)
+- **기술**: Selenium 웹 자동화, XML 파싱, 규제 자동 분류
+- **출력**: `data/iec62474_substances.json` (항상 최신 버전 유지)
+
+```bash
+# IEC62474 최신 데이터 다운로드 및 처리 (권장)
+python modules/etl-pipeline/iec62474_etl.py
+
+# 기존 XML 파일 사용
+python modules/etl-pipeline/iec62474_etl.py --skip-download
+```
+
+**📖 상세 가이드**: [`docs/iec62474-etl-user-guide.md`](docs/iec62474-etl-user-guide.md)
 
 ### EU REACH 데이터 ETL 파이프라인
 **파일**: `modules/etl-pipeline/reach_etl.py`
@@ -212,14 +233,16 @@ Note: This project is designed for easy transfer to another Windows PC (e.g., co
 ### ✅ Completed
 - [x] Project initial structure setup
 - [x] README and documentation
+- [x] ⭐ **IEC62474 통합 물질 선언 ETL 파이프라인 구축** (RoHS, REACH, GADSL 등 통합)
 - [x] EU REACH 화학물질 데이터 ETL 파이프라인 구축
 - [x] 한국 KOSHA 산안법 특수관리물질 ETL 파이프라인 구축
 - [x] ETL 모듈 상세 문서화
 - [x] Streamlit 대시보드 개발 (ETL 데이터 시각화)
+- [x] 기존 RoHS ETL을 IEC62474 ETL로 통합 및 대체
 
 ### 🚧 In Progress
+- [ ] IEC62474 데이터 기반 대시보드 업데이트
 - [ ] Develop data-scraping module (웹 스크래핑 고도화)
-- [ ] Build additional ETL pipeline modules
 
 ### 📝 Planned
 - [ ] Create visualization dashboards

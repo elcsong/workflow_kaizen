@@ -1,11 +1,132 @@
 # 화학물질 데이터 ETL 모듈 설명서
 
-이 문서는 `reach_etl.py`와 `kosha_etl.py` 두 개의 ETL(Extract, Transform, Load) 모듈에 대해 자세히 설명합니다. 각 모듈은 화학물질 안전 데이터를 자동으로 수집하고 처리하는 파이프라인입니다.
+이 문서는 화학물질 안전 데이터를 자동으로 수집하고 처리하는 ETL(Extract, Transform, Load) 모듈에 대해 자세히 설명합니다.
 
 ## 목차
-1. [EU REACH ETL 모듈 (reach_etl.py)](#eu-reach-etl-모듈-reach_etlpy)
-2. [한국 KOSHA ETL 모듈 (kosha_etl.py)](#한국-kosha-etl-모듈-kosha_etlpy)
-3. [공통 특징 및 사용법](#공통-특징-및-사용법)
+1. [IEC62474 ETL 모듈 (iec62474_etl.py)](#iec62474-etl-모듈-iec62474_etlpy)
+2. [EU REACH ETL 모듈 (reach_etl.py)](#eu-reach-etl-모듈-reach_etlpy)
+3. [한국 KOSHA ETL 모듈 (kosha_etl.py)](#한국-kosha-etl-모듈-kosha_etlpy)
+4. [공통 특징 및 사용법](#공통-특징-및-사용법)
+
+---
+
+## IEC62474 ETL 모듈 (iec62474_etl.py)
+
+### 개요
+IEC62474 Declarable Substances 데이터베이스를 자동으로 수집하는 통합 ETL 파이프라인입니다. RoHS, REACH, GADSL, Conflict Minerals, POPs 등 다양한 국제 규제를 통합하여 관리합니다.
+
+### 대상 데이터
+- **IEC62474 Declarable Substances List**: 400개 이상의 선언 가능 물질
+- **통합 규제**: RoHS, REACH (SVHC, Annex XIV, XVII), GADSL, Conflict Minerals, TSCA, POPs, Prop 65 등
+
+### ETL 프로세스 상세 설명
+
+#### 1. Extract (추출) 단계
+```python
+# Selenium을 사용하여 IEC62474 웹사이트에서 XML 다운로드
+download_xml()
+```
+
+**동작 방식:**
+- Selenium WebDriver를 사용하여 Chrome/Edge 브라우저를 자동 제어
+- IEC62474 공식 사이트 접속: `https://std.iec.ch/iec62474`
+- 쿠키 동의 처리
+- "Export all in XML" 버튼 클릭
+- 다운로드 링크 대기 및 클릭
+- XML 파일 다운로드 완료까지 자동 대기
+
+#### 2. Transform (변환) 단계
+```python
+# XML 데이터를 파싱하여 구조화된 데이터로 변환
+parse_xml(xml_file)
+```
+
+**처리 내용:**
+- XML 파일 파싱 (`<el>` 태그 각각이 하나의 물질)
+- 물질 정보 추출:
+  - 기본 정보: ID, 이름, CAS 번호, 물질 그룹
+  - 규제 정보: 적용 규제 목록 및 세부사항
+  - 보고 정보: 보고 임계값, 보고 레벨, 보고 요구사항
+  - 응용 정보: 일반적인 응용 분야, 보고 가능한 응용 분야
+  - 메타 정보: 최초 추가일, 최종 수정일, 주석
+- Basis Description에서 규제 정보 자동 추출 (RoHS, REACH, GADSL 등)
+- 대체 이름 파싱 (Common Synonyms에서 추출)
+
+#### 3. Load (적재) 단계
+```python
+# JSON 형식으로 저장 (고정된 파일명 - 항상 최신 버전)
+load_to_json(json_data)
+```
+
+**저장 위치:** `data/iec62474_substances.json` (고정된 파일명, 항상 최신 버전으로 덮어쓰기)
+
+### 데이터 구조
+```json
+{
+  "metadata": {
+    "version": "2.0",
+    "standard": "IEC62474",
+    "last_updated": "2025-10-27 22:10:06",
+    "source": "https://std.iec.ch/iec62474",
+    "total_substances": 138,
+    "regulations": ["RoHS", "REACH", "GADSL", "TSCA", "POPs"],
+    "description": "IEC62474 Declarable Substances List..."
+  },
+  "substances": [
+    {
+      "id": "00001",
+      "name": "Diarsenic pentoxide",
+      "cas_number": "1303-28-2",
+      "substance_group": "Other",
+      "alternative_names": ["1,3-dioxodiarsoxane 1,3-dioxide"],
+      "typical_applications": "Additive in wood, metal, glass and plastics",
+      "reporting_threshold": "0.1 mass% of article",
+      "reporting_level": "Article",
+      "reporting_requirement": "Mandatory",
+      "regulations": {
+        "REACH": {
+          "source": "EU Regulation (EC) No.1907/2006",
+          "svhc": true,
+          "annex_xiv": true
+        }
+      },
+      "first_added": "2010-04-02",
+      "last_revised": "2016-03-28"
+    }
+  ],
+  "substance_groups": {
+    "Heavy Metals": ["Lead", "Mercury", "Cadmium"],
+    "Phthalates": ["DEHP", "BBP", "DBP"],
+    "Flame Retardants": ["PBB", "PBDE"]
+  }
+}
+```
+
+### 실행 방법
+```bash
+# 최신 데이터 다운로드 및 처리 (권장)
+python modules/etl-pipeline/iec62474_etl.py
+
+# 기존 XML 파일 사용 (다운로드 생략)
+python modules/etl-pipeline/iec62474_etl.py --skip-download
+
+# 특정 XML 파일 지정
+python modules/etl-pipeline/iec62474_etl.py --skip-download --xml-file path/to/file.xml
+```
+
+### 주요 특징
+- **통합 규제 관리**: 단일 소스에서 여러 규제 정보 통합
+- **자동 업데이트**: 웹사이트에서 최신 버전 자동 다운로드
+- **고정 파일명**: `iec62474_substances.json` 파일은 항상 최신 버전으로 유지
+- **상세한 메타데이터**: 각 물질의 보고 요구사항, 규제 근거 등 상세 정보 포함
+- **규제 자동 분류**: Basis Description을 분석하여 적용 규제 자동 식별
+
+### 기존 RoHS ETL 대비 개선사항
+- **확장된 물질 범위**: 10개 → 400개 이상 물질
+- **다양한 규제 통합**: RoHS 단독 → RoHS + REACH + GADSL + Conflict Minerals 등
+- **상세한 보고 정보**: 보고 임계값, 보고 레벨, 면제 사항 등 상세 정보
+- **물질 그룹화**: 물질을 그룹별로 분류하여 관리
+- **국제 표준**: IEC 국제 표준 기반
 
 ---
 
