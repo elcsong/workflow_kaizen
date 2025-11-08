@@ -1,0 +1,85 @@
+# nlp_config.yaml
+ 
+# ===============================================
+# NLP Stopwords / Allow-list / Regex exclusions
+# Version this file (e.g., v1.0.0) and track in VC.
+# ===============================================
+version: v1.0.0
+nlp:
+  stopwords:
+    global:
+      # language‑agnostic function words, months, etc. → 언제나 제거 안전
+      - the
+      - and
+      - of
+      - to
+      - for
+      - in
+      - on
+      - at
+      - by
+      - from
+      - with
+      - without
+      - a
+      - an
+      - or
+      - not
+      - is
+      - are
+      - was
+      - were
+      - be
+      - been
+      - being
+      - jan
+      - feb
+      - mar
+      - apr
+      - may
+      - jun
+      - jul
+      - aug
+      - sep
+      - oct
+      - nov
+      - dec
+    domain:
+      # 초음파 서비스/컴플레인 로그에서 구분력 낮은 행정·상태 단어 (중복 제거됨)
+      - warranty
+      - service
+      - reported
+      - remote
+      - field
+      - hcs
+      - site
+      - performed
+      - customer
+      - support
+      - update
+      - case
+      - wo
+      - null
+      - active
+      - closed
+      - manager
+      - doc
+      - info
+      - please
+      - ge
+      - new
+      - oct
+      - carric
+      - catherine
+      - collecting
+      - data
+    dataset: []   # 신규 데이터에서 발견 시 운영 중 추가(운영팀 승인 후 반영)
+  allowlist:
+    # stopwords에 잡히더라도 '보호'해야 할 도메인/문구(예: 정식 용어, 모드명)
+    - "service mode"
+    - "support request"
+  regex_exclusions:
+    # 토큰화 초기에 배제할 패턴(작업/문서ID, 날짜 등 잡음)
+    - '^[A-Z]{2,}-?\d{4,}$'           # 예: WO-15262658
+    - '^\d{1,2}/\d{1,2}/\d{2,4}$'     # 예: 03/25/2025
+    - '^\d{4}-\d{2}-\d{2}$'           # 예: 2025-03-25

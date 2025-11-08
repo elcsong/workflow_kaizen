@@ -1,0 +1,1369 @@
+"""
+하이브리드 매처: Target Complaint ID + 키워드 필터링 + 기존 분석 모듈 활용
+"""
+import pandas as pd
+import numpy as np
+import re
+from typing import Dict, List, Optional, Tuple, Any
+import logging
+from pathlib import Path
+from datetime import datetime
+import difflib
+import json
+import yaml
+ 
+from .matcher import DefectMatcher
+from .config import TargetConfig
+from ..extract.keywords import KeywordExtractor
+from ..extract.negation import NegationDetector
+ 
+class DynamicTargetConfig:
+    """엑셀 데이터에서 동적으로 생성되는 타겟 설정"""
+   
+    def __init__(self,
+                 target_data: Dict[str, str],
+                 target_id: str,
+                 seed_keywords: Optional[List[str]] = None,
+                 effective_stopwords: Optional[set] = None):
+        """
+        Args:
+            target_data: 타겟 행의 데이터 딕셔너리
+            target_id: Complaint ID
+        """
+        self.target_id = target_id
+        self.target_data = target_data
+        self._seed_keywords = seed_keywords or []
+        self._effective_stopwords = effective_stopwords or set()
+        self._config = self._build_config()
+   
+    def _extract_keywords_from_text(self, text: str, min_length: int = 3) -> List[str]:
+        """텍스트에서 키워드 추출"""
+        if not text or pd.isna(text):
+            return []
+       
+        # 기본 단어 추출
+        pattern = r'\b[a-zA-Z]{' + str(min_length) + r',}\b'
+        words = re.findall(pattern, str(text).lower())
+       
+        # 최소한의 불용어만 제거 (너무 일반적인 것들만)
+        stop_words = {
+            'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was',
+            'one', 'our', 'out', 'day', 'get', 'has', 'him', 'his', 'how', 'man', 'new', 'now',
+            'old', 'see', 'two', 'way', 'who', 'boy', 'did', 'its', 'let', 'put', 'say', 'she',
+            'too', 'use', 'with', 'have', 'from', 'they', 'know', 'want', 'been', 'much',
+            'some', 'time', 'very', 'when', 'come', 'here', 'just', 'like', 'long', 'make', 'many',
+            'over', 'such', 'take', 'than', 'them', 'well', 'were', 'will', 'would', 'there', 'what'
+        }
+       
+        # 불용어가 아니고 숫자가 아닌 단어들만 선택
+        keywords = []
+        for word in words:
+            if (word not in stop_words and
+                not word.isdigit() and
+                len(word) >= min_length):
+                keywords.append(word)
+       
+        return keywords
+   
+    def _build_config(self) -> Dict[str, Any]:
+        """타겟 데이터에서 설정 구성"""
+        # 텍스트 컬럼들
+        text_columns = [
+            'Customers Issue Description(Full)',
+            "FE's Issue Description(Full)",
+            'Actions Taken / Repairs(Full)',
+            'Repair Test / Inspection Data(Full)'
+        ]
+       
+        # 각 컬럼에서 키워드 추출
+        all_keywords = []
+        symptoms = []
+        actions = []
+        components = []
+       
+        for col in text_columns:
+            text = self.target_data.get(col, '')
+            keywords = self._extract_keywords_from_text(text)
+            all_keywords.extend(keywords)
+           
+            if 'Customer' in col or 'Issue' in col:
+                symptoms.extend(keywords)
+            elif 'Action' in col or 'Repair' in col:
+                actions.extend(keywords)
+            elif 'FE' in col:
+                # FE 설명에서는 증상과 부품 정보 모두 추출
+                symptoms.extend(keywords[:3])  # 처음 3개는 증상으로
+                components.extend(keywords[3:])  # 나머지는 부품으로
+       
+        # 중복 제거 및 빈도 기반 선별 2025-09-11
+ 
+        # --- (A) Stopwords/숫자 제거 ---
+        from collections import Counter
+        def _clean(tokens):
+            out = []
+            for t in tokens:
+                if not t: continue
+                t = t.strip().lower()
+                if not t: continue
+                if t in self._effective_stopwords: continue
+                if t.isdigit(): continue
+                out.append(t)
+            return out
+        all_keywords = _clean(all_keywords)
+        symptoms = _clean(symptoms)
+        actions = _clean(actions)
+        components = _clean(components)
+        keyword_counts = Counter(all_keywords)
+        frequent_keywords = [w for w, c in keyword_counts.items() if c >= 1]
+                             
+        # --- (B) 결정적 상위: 빈도↓ → 알파벳↑ ---
+        def _topk(tokens, k):
+            cnt = Counter([t for t in tokens if t])
+            return [w for w, _ in sorted(cnt.items(), key=lambda x: (-x[1], x[0]))[:k]]
+       
+        # 씨앗(Seeds) 구성: --keywords에서 온 도메인 핵심(길이 제한 없음, 와일드카드 지원)
+        import logging
+        
+        logging.info(f"[DynamicConfig Debug] _seed_keywords: {self._seed_keywords}")
+        logging.info(f"[DynamicConfig Debug] _effective_stopwords sample (first 20): {list(self._effective_stopwords)[:20]}")
+        
+        seeds = []
+        for s in (self._seed_keywords or []):
+            s = str(s).strip().lower()
+            if not s: continue
+            
+            # 와일드카드 패턴이 있으면 그대로 보존
+            if '*' in s:
+                if s not in seeds:
+                    seeds.append(s)
+            else:
+                # 복합어는 토큰화 (언더스코어로 연결된 단어는 유지)
+                # \w = [a-zA-Z0-9_], 하이픈과 슬래시도 유지
+                # 예: 'double image' → ['double', 'image']
+                #     'double_image' → ['double_image']
+                for tok in re.split(r'[^\w\-\/]+', s):
+                    if tok and tok not in seeds:
+                        seeds.append(tok)
+        
+        logging.info(f"[DynamicConfig Debug] seeds (after tokenization, before stopwords filter): {seeds}")
+        
+        # seeds 중 stopwords/숫자 제거 (단, 와일드카드는 제외)
+        seeds = [t for t in seeds if ('*' in t) or (t not in self._effective_stopwords and not t.isdigit())]
+        
+        logging.info(f"[DynamicConfig Debug] seeds (after stopwords filter): {seeds}")
+ 
+        # 증상 키워드: seed만 사용 (--keywords로 주어진 것들만)
+        symptom_keywords = []
+        # seeds 모두 추가 (제한 없음)
+        for t in seeds:
+            if t not in symptom_keywords:
+                symptom_keywords.append(t)
+        # 백업: seeds가 비어 있으면 frequent로 채움
+        if not symptom_keywords:
+            symptom_keywords = _topk(frequent_keywords, 8)
+        # 조치/부품 힌트도 결정적 상위
+        # Action Hints 완전 비활성: 생성·저장하지 않음
+        #- action_keywords    = _topk(actions, 8)
+        component_keywords = _topk(components, 6)
+       
+ 
+        config = {
+            'id': f"DYNAMIC_{self.target_id}",
+            'name': f"Dynamic target from {self.target_id}",
+            'symptoms': {
+                'required_any': symptom_keywords,
+                'synonyms': []  # 동의어는 일단 비워둠
+            },
+            'negation_patterns': [
+                'not reproducible', 'no issue', 'passed all tests', 'resolved',
+                'working properly', 'normal operation', 'no problem', 'functioning correctly',
+                'passed', 'ok', 'good', 'fine', 'normal'
+            ],
+            #-'action_hints': action_keywords,
+            'component_hints': component_keywords,
+            'confusers': [],  # 혼동 키워드는 비워둠
+            'policy': {
+                'require_symptom': True,
+                'min_score': 0.55,  # 동적 생성이므로 약간 낮춤
+                'review_band': [0.45, 0.55],
+                'treat_resolved_as_match': True
+            },
+            'codes': {}
+        }
+       
+        return config
+   
+    # TargetConfig와 동일한 인터페이스 제공
+    @property
+    def id(self) -> str:
+        return self._config['id']
+   
+    @property
+    def name(self) -> str:
+        return self._config['name']
+   
+    @property
+    def symptoms(self) -> Dict[str, List[str]]:
+        return self._config['symptoms']
+   
+    @property
+    def required_symptoms(self) -> List[str]:
+        return self.symptoms.get('required_any', [])
+   
+    @property
+    def symptom_synonyms(self) -> List[str]:
+        return self.symptoms.get('synonyms', [])
+   
+    @property
+    def all_symptoms(self) -> List[str]:
+        return self.required_symptoms + self.symptom_synonyms
+   
+    @property
+    def negation_patterns(self) -> List[str]:
+        return self._config.get('negation_patterns', [])
+   
+    @property
+    def action_hints(self) -> List[str]:
+        return self._config.get('action_hints', [])
+   
+    @property
+    def component_hints(self) -> List[str]:
+        return self._config.get('component_hints', [])
+   
+    @property
+    def confusers(self) -> List[str]:
+        return self._config.get('confusers', [])
+   
+    @property
+    def policy(self) -> Dict[str, Any]:
+        return self._config['policy']
+   
+    @property
+    def require_symptom(self) -> bool:
+        return self.policy.get('require_symptom', True)
+   
+    @property
+    def min_score(self) -> float:
+        return self.policy.get('min_score', 0.6)
+   
+    @property
+    def review_band(self) -> List[float]:
+        return self.policy.get('review_band', [0.55, 0.60])
+   
+    @property
+    def treat_resolved_as_match(self) -> bool:
+        return self.policy.get('treat_resolved_as_match', True)
+   
+    @property
+    def codes(self) -> Dict[str, Any]:
+        return self._config.get('codes', {})
+ 
+class HybridMatcher:
+    """하이브리드 매처: Target Complaint ID + 키워드 필터링 + 기존 분석 모듈 활용"""
+   
+    def __init__(self,
+                 excel_path: str,
+                 target_complaint_id: str,
+                 filter_keywords: str,
+                 similarity_threshold: float = 0.7,
+                 use_sbert: bool = True,
+                 alpha: float = 0.5,
+                 min_score: Optional[float] = None,
+                 review_band: Optional[Tuple[float, float]] = None,
+                 require_symptom: Optional[bool] = None,
+                 treat_resolved_as_match: Optional[bool] = None,
+                 # NEW: 2025-09-11
+                 exact_only: Optional[List[str]] = None,
+                 auto_short_exact: bool = True,
+                 nlp_config_path: Optional[str] = None,
+                 no_domain_stopwords: bool = False,
+                 component_hints_override: Optional[str] = None):
+        """
+        Args:
+            excel_path: 엑셀 파일 경로
+            target_complaint_id: 기준이 되는 Complaint ID
+            filter_keywords: 1차 필터링용 키워드 (콤마로 구분)
+            similarity_threshold: 키워드 유사도 임계값
+            use_sbert: SBERT 사용 여부
+            alpha: 룰 vs 의미 점수 가중치
+            min_score: 최소 임계점 (None이면 기본값 사용)
+            review_band: 리뷰 구간 (None이면 기본값 사용)
+            require_symptom: 증상 필수 여부 (None이면 기본값 사용)
+            treat_resolved_as_match: 해결된 케이스 매칭 여부 (None이면 기본값 사용)
+        """
+        self.excel_path = excel_path
+        self.target_complaint_id = target_complaint_id
+        self.filter_keywords = self._parse_keywords(filter_keywords)
+        self.similarity_threshold = similarity_threshold
+        self.use_sbert = use_sbert
+        self.alpha = alpha
+ 
+        # NEW: exact-only config (표시 버그/1글자 노이즈 방지 포함)
+        self.exact_only_explicit = [kw.strip().lower() for kw in (exact_only or []) if kw.strip()]
+        self.auto_short_exact = auto_short_exact
+        if isinstance(exact_only, str):
+            self.exact_only_explicit = [w.strip().lower() for w in exact_only.split(',') if w.strip()]
+       
+        # 임계값 설정 저장
+        self.threshold_overrides = {
+            'min_score': min_score,
+            'review_band': review_band,
+            'require_symptom': require_symptom,
+            'treat_resolved_as_match': treat_resolved_as_match
+        }
+       
+        # 텍스트 컬럼 정의
+        self.text_columns = [
+            'Customers Issue Description(Full)',
+            "FE's Issue Description(Full)",
+            'Actions Taken / Repairs(Full)',
+            'Repair Test / Inspection Data(Full)'
+        ]
+       
+        # 분석 설정 저장
+        self.analysis_config = {
+            'target_complaint_id': target_complaint_id,
+            'filter_keywords': self.filter_keywords,
+            'similarity_threshold': similarity_threshold,
+            'use_sbert': use_sbert,
+            'alpha': alpha,
+            'analysis_method': 'Hybrid Analysis (Target ID + Keywords + Full Scoring)',
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'threshold_overrides': {k: v for k, v in self.threshold_overrides.items() if v is not None}
+        }
+        # NEW: expose matching policy 2025-09-11
+        self.analysis_config['exact_only'] = self.exact_only_explicit
+        self.analysis_config['auto_short_exact'] = self.auto_short_exact
+ 
+        # NLP config path & domain stopwords flag
+        self.nlp_config_path = nlp_config_path
+        self.no_domain_stopwords = no_domain_stopwords
+        self.analysis_config['nlp_config'] = nlp_config_path or '(none)'
+        self.analysis_config['no_domain_stopwords'] = no_domain_stopwords
+        # --- Component hints override (CLI) ---
+        self._component_hints_override = None
+        if component_hints_override:
+            # normalize: split by comma, strip, lower, deduplicate but keep input order
+            raw = [w.strip() for w in str(component_hints_override).split(',') if w.strip()]
+            seen = set()
+            ordered = []
+            for w in raw:
+                lw = w.lower()
+                if lw not in seen:
+                    seen.add(lw)
+                    ordered.append(lw)
+            self._component_hints_override = ordered
+            # 기록(결과 Settings 시트에도 남도록)
+            self.analysis_config['component_hints_override'] = ordered
+ 
+        # --- Load NLP config file ---
+        self._nlp_cfg = {}
+        self._effective_stopwords = set()
+        self._allowlist = set()
+        self._nlp_version = '(none)'
+        try:
+            if self.nlp_config_path:
+                with open(self.nlp_config_path, 'r', encoding='utf-8') as f:
+                    self._nlp_cfg = yaml.safe_load(f) or {}
+                    self._nlp_version = str(self._nlp_cfg.get('version', '(none)'))
+        except Exception as e:
+            logging.warning(f"Failed to load NLP config: {e}")
+        self._build_effective_stopwords()
+ 
+        # 초기화 시 타겟 설정과 매처 준비
+        self.df = None
+        self.target_config = None
+        self.defect_matcher = None
+       
+        logging.info(f"HybridMatcher initialized - Target: {target_complaint_id}, Keywords: {self.filter_keywords}")
+   
+    def _build_effective_stopwords(self):
+        """(Global ∪ Domain ∪ Dataset) − AllowList − Seeds (원본 + 토큰화)"""
+        nlp = (self._nlp_cfg or {}).get('nlp', {})
+        sw = (nlp.get('stopwords', {}) if isinstance(nlp.get('stopwords', {}), dict) else {})
+        def _to_set(x):
+            if isinstance(x, list):
+                bag = []
+                for item in x:
+                    bag.extend([t.strip().lower() for t in str(item).split() if t.strip()])
+                return set(bag)
+            return set()
+        sw_global  = _to_set(sw.get('global', []))
+        sw_domain  = _to_set(sw.get('domain', []))
+        sw_dataset = _to_set(sw.get('dataset', []))
+        if self.no_domain_stopwords:
+            sw_domain = set()
+        self._allowlist = _to_set(nlp.get('allowlist', []))
+
+        # seeds (from --keywords): 원본 키워드
+        seeds_original = set(self._parse_keywords(self.filter_keywords))
+        
+        # 디버깅: 원본 키워드 로그
+        logging.info(f"[Stopwords Debug] filter_keywords raw: {self.filter_keywords}")
+        logging.info(f"[Stopwords Debug] seeds_original: {seeds_original}")
+        
+        # 토큰화된 키워드도 보호 (DynamicTargetConfig와 동일한 토큰화 로직)
+        seeds_tokenized = set()
+        for s in seeds_original:
+            s = str(s).strip().lower()
+            if '*' in s:
+                # 와일드카드는 그대로
+                seeds_tokenized.add(s)
+            else:
+                # 복합어는 토큰화 (언더스코어로 연결된 단어는 유지)
+                # \w = [a-zA-Z0-9_], 하이픈과 슬래시도 유지
+                for tok in re.split(r'[^\w\-\/]+', s):
+                    if tok:
+                        seeds_tokenized.add(tok)
+        
+        # seeds = 원본 + 토큰화
+        seeds = seeds_original | seeds_tokenized
+        
+        # 디버깅: 최종 seeds 로그
+        logging.info(f"[Stopwords Debug] seeds_tokenized: {seeds_tokenized}")
+        logging.info(f"[Stopwords Debug] seeds (combined): {seeds}")
+       
+        effective = (sw_global | sw_domain | sw_dataset) - self._allowlist - seeds
+        self._effective_stopwords = effective
+        # 기록
+        self.analysis_config['nlp_version'] = self._nlp_version
+        self.analysis_config['stopwords_sizes'] = {      
+            'global': len(sw_global), 'domain': len(sw_domain), 'dataset': len(sw_dataset),
+            'allowlist': len(self._allowlist), 'seeds': len(seeds),
+            'effective': len(self._effective_stopwords)
+        }
+ 
+    '''
+    def _parse_keywords(self, keywords_str: str) -> List[str]:
+        """콤마로 구분된 키워드 문자열을 리스트로 변환"""
+        if not keywords_str:
+            return []
+       
+        keywords = [kw.strip().lower() for kw in keywords_str.split(',')]
+        keywords = [kw for kw in keywords if kw]
+       
+        return keywords
+    '''
+    def _parse_keywords(self, keywords: Any) -> List[str]:
+        """키워드를 리스트[str]로 정규화 (str | list 모두 허용)"""
+        if keywords is None:
+            return []
+        if isinstance(keywords, list):
+            return [str(k).strip().lower() for k in keywords if str(k).strip()]
+        # 문자열인 경우 콤마 분리
+        return [kw.strip().lower() for kw in str(keywords).split(',') if kw.strip()]
+ 
+    # NEW: split keyword set -> exact-only vs fuzzy 2025-09-11
+    def _split_exact_fuzzy(self, keywords: List[str]) -> Tuple[set, set]:
+        kw_all = {k.strip().lower() for k in keywords if k.strip()}
+        exact = set(self.exact_only_explicit)
+        if self.auto_short_exact:
+            # 1글자 제외, 2~3자 약어 자동 exact
+            exact |= {k for k in kw_all if 2 <= len(k) <= 3 and " " not in k and "-" not in k and "/" not in k}
+        # only single tokens remain in exact; phrases stay in fuzzy
+        exact = {k for k in exact if " " not in k and "-" not in k and "/" not in k}
+        fuzzy = kw_all - exact
+        return exact, fuzzy
+ 
+    # NEW: exact-only whole-word matcher (case-insensitive, alnum boundary) 2025-09-11
+    def _exact_match_keyword(self, text: str, keyword: str) -> List[Tuple[str, float, int, int]]:
+        if not text or not keyword:
+            return []
+        pat = re.compile(rf"\b{re.escape(keyword)}\b", re.IGNORECASE)
+        #pat = re.compile(rf"(?<![0-9A-Za-z]){re.escape(keyword)}(?![0-9A-Za-z])", re.IGNORECASE)
+        out = []
+        for m in pat.finditer(text):
+            out.append((m.group(), 1.0, m.start(), m.end()))
+            if len(out) >= 8:  # cap evidences
+                break
+        return out
+
+
+    def _load_excel_and_extract_target(self, sheet_name: str = 'Sheet1') -> Tuple[pd.DataFrame, Dict[str, str]]:
+        """엑셀 로드 및 타겟 행 추출"""
+        try:
+            df = pd.read_excel(self.excel_path, sheet_name=sheet_name)
+            logging.info(f"Loaded {len(df)} records from {self.excel_path}")
+        except Exception as e:
+            raise ValueError(f"Failed to load Excel file: {e}")
+       
+        # 필수 컬럼 확인
+        required_cols = ['Complaint ID'] + self.text_columns
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            raise ValueError(f"Missing required columns: {missing_cols}")
+       
+        # 타겟 ID 행 찾기
+        target_rows = df[df['Complaint ID'] == self.target_complaint_id]
+        if target_rows.empty:
+            raise ValueError(f"Target Complaint ID '{self.target_complaint_id}' not found in data")
+       
+        if len(target_rows) > 1:
+            logging.warning(f"Multiple rows found for ID '{self.target_complaint_id}', using first one")
+       
+        target_data = target_rows.iloc[0].to_dict()
+        logging.info(f"Found target data for {self.target_complaint_id}")
+       
+        return df, target_data
+   
+    def _generate_keyword_variants(self, keyword: str) -> List[str]:
+        """키워드의 다양한 변형 생성"""
+        variants = [keyword]
+       
+        # 기본 대소문자 변형
+        variants.extend([
+            keyword.upper(),
+            keyword.capitalize(),
+            keyword.title()
+        ])
+       
+        # 어간 변화
+        if keyword.endswith('y'):
+            variants.append(keyword[:-1] + 'ies')
+            variants.append(keyword + 'ing')
+       
+        if not keyword.endswith('ing'):
+            variants.append(keyword + 'ing')
+       
+        if not keyword.endswith('ed'):
+            variants.append(keyword + 'ed')
+       
+        if not keyword.endswith('s'):
+            variants.append(keyword + 's')
+       
+        # 복수형 변형
+        if keyword.endswith('s') and len(keyword) > 2:
+            variants.append(keyword[:-1])
+       
+        return list(set(variants))
+   
+    def _fuzzy_match_keyword(self, text: str, keyword: str) -> List[Tuple[str, float, int, int]]:
+        """텍스트에서 키워드와 유사한 단어들을 찾기"""
+        if not text or not keyword:
+            return []
+       
+        matches = []
+        text_lower = text.lower()
+ 
+        # [추가] 0) 먼저 다단어(phrase) 키워드는 '문장 그대로' 찾습니다 (2025-09-04)
+        kw_stripped = keyword.strip()
+        if " " in kw_stripped:  # 공백 포함 ⇒ 문구 키워드
+            phrase_pattern = re.compile(re.escape(kw_stripped), re.IGNORECASE)
+            for match in phrase_pattern.finditer(text):
+                matches.append((match.group(), 1.0, match.start(), match.end()))
+            # 문구가 하나라도 잡히면 충분하므로 바로 반환(원하시면 주석 처리 가능)
+            if matches:
+                return matches
+        # [변경] 토큰 정규식: 하이픈(-), 슬래시(/) 포함 토큰을 허용 (2025-09-04)
+        #words = re.findall(r'\b\w+\b', text_lower)
+        words = re.findall(r'\b[\w\-\/]+\b', text_lower)
+       
+        keyword_variants = self._generate_keyword_variants(keyword)
+       
+        for word in set(words):
+            # 정확한 매치 확인
+            if any(variant.lower() == word for variant in keyword_variants):
+                pattern = re.compile(r'\b' + re.escape(word) + r'\b', re.IGNORECASE)
+                for match in pattern.finditer(text):
+                    matches.append((match.group(), 1.0, match.start(), match.end()))
+            else:
+                # 유사도 매칭
+                for variant in keyword_variants:
+                    similarity = difflib.SequenceMatcher(None, word, variant.lower()).ratio()
+                    if similarity >= self.similarity_threshold:
+                        pattern = re.compile(r'\b' + re.escape(word) + r'\b', re.IGNORECASE)
+                        for match in pattern.finditer(text):
+                            matches.append((match.group(), similarity, match.start(), match.end()))
+       
+        matches.sort(key=lambda x: x[1], reverse=True)
+        return matches
+   
+    def _filter_by_keywords(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict]:
+        """키워드로 데이터프레임 필터링"""
+        # ✅ SBERT-only(또는 프리필터 비활성)일 때: 키워드가 비면 전체 행 통과
+        if not self.filter_keywords:
+            logging.info("No filter keywords -> bypass prefilter (SBERT-only): return full dataset")
+            # evidence는 빈 dict로 채웁니다(형식 유지)
+            return df.copy(), {i: {} for i in df.index}
+       
+        filtered_indices = []
+        keyword_evidence = {}
+        # NEW: split keyword set (once) 2025-09-11
+        exact_set, fuzzy_set = self._split_exact_fuzzy(self.filter_keywords)
+        for idx, row in df.iterrows():
+           
+            # 1) 타겟 판별 (마커 없이) (Updated: 2025-09-05)
+            is_target = (str(row.get('Complaint ID')) == str(self.target_complaint_id))
+ 
+            row_matches = {}
+            total_matches = 0
+           
+            # 2) 일반적인 키워드 매칭 수행 (타겟 행도 동일하게 수행)
+            for col in self.text_columns:
+                if col not in row or pd.isna(row[col]):
+                    continue
+               
+                text = str(row[col])
+                col_matches = []
+               
+                for keyword in self.filter_keywords:
+                    # MODIFY: 2025-09-11
+                    #matches = self._fuzzy_match_keyword(text, keyword)
+                    kw=keyword.strip().lower()
+                    if kw in exact_set:
+                        matches = self._exact_match_keyword(text, kw)
+                    else:
+                        matches = self._fuzzy_match_keyword(text, kw)
+                    if matches:
+                        col_matches.extend([(keyword, match) for match in matches])
+                        total_matches += len(matches)
+               
+                if col_matches:
+                    row_matches[col] = col_matches
+ 
+            # 3) 포함 조건: 매칭 있거나, 타겟 행이거나
+            if total_matches > 0 or is_target:
+                filtered_indices.append(idx)
+                # 타겟 행에서 매칭이 0건이라면 빈 dict가 들어가도 OK (포맷터가 빈 값 처리)
+                keyword_evidence[idx] = row_matches
+       
+        filtered_df = df.loc[filtered_indices].copy() if filtered_indices else pd.DataFrame()
+       
+        return filtered_df, keyword_evidence
+   
+    def _format_keyword_evidence(self, evidence_dict: Dict) -> str:
+        """키워드 증거를 사람이 읽기 쉬운 형태로 포맷팅"""
+        if not evidence_dict:
+            return ""
+       
+        formatted_parts = []
+       
+        for col, matches in evidence_dict.items():
+            if not matches:
+                continue
+           
+            col_short = col.split('(')[0].strip()
+            match_strs = []
+           
+            for keyword, (matched_word, similarity, start, end) in matches:
+                if similarity >= 0.95:
+                    match_strs.append(f'"{matched_word}"')
+                else:
+                    match_strs.append(f'"{matched_word}"({similarity:.2f})')
+           
+            if match_strs:
+                formatted_parts.append(f"{col_short}: {', '.join(match_strs)}")
+       
+        return " | ".join(formatted_parts)
+   
+    def _extract_context_around_match(self, text: str, start: int, end: int, context_size: int = 40) -> str:
+        """매칭된 키워드 주변의 문맥 추출 (구분자 인식)"""
+        if not text:
+            return ""
+       
+        # 일반적인 구분자들
+        separators = ['^^^^^^^^^^^^', '//////', '============', '------------',
+                     '***********', '###########', '+++++++++++', '~~~~~~~~~~~']
+       
+        # 매칭 위치 기준으로 앞뒤 문맥 추출
+        context_start = max(0, start - context_size)
+        context_end = min(len(text), end + context_size)
+       
+        # 구분자가 포함된 경우 구분자까지만 추출
+        context_text = text[context_start:context_end]
+       
+        # 앞쪽 구분자 확인
+        for sep in separators:
+            sep_pos = context_text.find(sep)
+            if sep_pos != -1 and sep_pos < (start - context_start):
+                # 구분자 뒤부터 시작
+                context_start_adj = context_start + sep_pos + len(sep)
+                context_text = text[context_start_adj:context_end]
+                break
+       
+        # 뒤쪽 구분자 확인
+        for sep in separators:
+            sep_pos = context_text.find(sep, start - context_start)
+            if sep_pos != -1:
+                # 구분자 앞까지만
+                context_text = context_text[:sep_pos]
+                break
+       
+        # 매칭된 단어를 강조 표시
+        matched_word = text[start:end]
+        highlighted_context = context_text.replace(matched_word, f"**{matched_word}**")
+       
+        return highlighted_context.strip()
+   
+    def _create_detailed_evidence(self, evidence_dict: Dict, original_data: Dict) -> str:
+        """상세한 증거 정보 생성 (문맥 포함)"""
+        if not evidence_dict:
+            return ""
+       
+        detailed_parts = []
+       
+        for col, matches in evidence_dict.items():
+            if not matches:
+                continue
+           
+            col_short = col.split('(')[0].strip()
+            original_text = original_data.get(col, "")
+           
+            if not original_text:
+                continue
+           
+            # 각 매칭에 대한 문맥 추출
+            match_contexts = []
+            for keyword, (matched_word, similarity, start, end) in matches:
+                context = self._extract_context_around_match(original_text, start, end, 30)
+                if context:
+                    similarity_info = f"({similarity:.2f})" if similarity < 0.95 else ""
+                    match_contexts.append(f"'{keyword}' → ...{context}...{similarity_info}")
+           
+            if match_contexts:
+                detailed_parts.append(f"[{col_short}] " + " | ".join(match_contexts))
+       
+        return "\n".join(detailed_parts)
+   
+    def analyze_excel(self,
+                     sheet_name: str = 'Sheet1',
+                     output_path: str = None,
+                     min_score: Optional[float] = None,
+                     review_band: Optional[Tuple[float, float]] = None,
+                     require_symptom: Optional[bool] = None,
+                     treat_resolved_as_match: Optional[bool] = None) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+        """
+        하이브리드 분석 수행
+       
+        Args:
+            sheet_name: 엑셀 시트명
+            output_path: 결과 파일 경로
+            min_score: 최소 임계점 (메서드 레벨 오버라이드)
+            review_band: 리뷰 구간 (메서드 레벨 오버라이드)
+            require_symptom: 증상 필수 여부 (메서드 레벨 오버라이드)
+            treat_resolved_as_match: 해결된 케이스 매칭 여부 (메서드 레벨 오버라이드)
+       
+        Returns:
+            (결과 데이터프레임, 분석 요약 정보)
+        """
+        logging.info(f"Starting hybrid analysis...")
+       
+        # 1. 임계값 설정 결합 (우선순위: 메서드 매개변수 > 인스턴스 설정 > 기본값)
+        effective_thresholds = {}
+        for key in ['min_score', 'review_band', 'require_symptom', 'treat_resolved_as_match']:
+            method_value = locals().get(key)
+            instance_value = self.threshold_overrides.get(key)
+           
+            if method_value is not None:
+                effective_thresholds[key] = method_value
+            elif instance_value is not None:
+                effective_thresholds[key] = instance_value
+       
+        logging.info(f"Using threshold overrides: {effective_thresholds}")
+       
+        # 2. 엑셀 로드 및 타겟 추출
+        self.df, target_data = self._load_excel_and_extract_target(sheet_name)
+       
+        # 3. 동적 타겟 설정 생성
+        #self.target_config = DynamicTargetConfig(target_data, self.target_complaint_id)
+        # 씨앗 증상으로 필터 키워드를 넘겨 도메인 토큰을 항상 포함
+        self.target_config = DynamicTargetConfig(
+            target_data,
+            self.target_complaint_id,
+            seed_keywords=self.filter_keywords,
+            effective_stopwords=self._effective_stopwords
+        )
+        # (중요) CLI에서 부품 힌트를 지정했다면 여기서 덮어쓰기
+        if self._component_hints_override is not None:
+            self.target_config._config['component_hints'] = self._component_hints_override
+ 
+        logging.info(f"Created dynamic target config with {len(self.target_config.required_symptoms)} symptoms")
+       
+        # 4. 타겟 설정에 임계값 오버라이드 적용
+        if effective_thresholds:
+            for key, value in effective_thresholds.items():
+                if key in ['min_score', 'require_symptom', 'treat_resolved_as_match']:
+                    self.target_config._config['policy'][key] = value
+                elif key == 'review_band' and isinstance(value, tuple):
+                    self.target_config._config['policy'][key] = list(value)
+       
+        # 3. DefectMatcher 초기화 (동적 설정 사용)
+        # DefectMatcher는 파일 경로를 받으므로 임시 파일 생성 필요
+        temp_config_path = self._save_temp_config()
+       
+        try:
+            self.defect_matcher = DefectMatcher(
+                target_config_path=temp_config_path,
+                use_sbert=self.use_sbert,
+                alpha=self.alpha,
+                # ↓ CLI/메서드에서 결합한 effective thresholds를 그대로 전달 (Update: 2025-09-04)
+                min_score=effective_thresholds.get('min_score'),
+                review_band=effective_thresholds.get('review_band'),
+                require_symptom=effective_thresholds.get('require_symptom'),
+                treat_resolved_as_match=effective_thresholds.get('treat_resolved_as_match')
+            )
+            logging.info("DefectMatcher initialized with dynamic config")
+        except Exception as e:
+            logging.error(f"Failed to initialize DefectMatcher: {e}")
+            raise
+       
+        # 4. 키워드 필터링
+        logging.info("Phase 1: Keyword filtering...")
+        filtered_df, keyword_evidence = self._filter_by_keywords(self.df)
+        '''필터 0건일 때도 Key error 발생 회피 (2025-09-04)
+        if filtered_df.empty:
+            logging.warning("No records matched the filter keywords")
+            return pd.DataFrame(), {
+                'total_records': len(self.df),
+                'filtered_records': 0,
+                'analyzed_records': 0,
+                'target_complaint_id': self.target_complaint_id,   # ← 추가: 필터결과가 0 건일 때 출력이 깨지지 않도록 (2025-09-04)
+                'filter_keywords': self.filter_keywords,           # ← 추가: 필터결과가 0 건일 때 출력이 깨지지 않도록 (2025-09-04)
+                'analysis_config': self.analysis_config,           # ← 추가: 필터결과가 0 건일 때 출력이 깨지지 않도록 (2025-09-04)
+                'target_config': self.target_config._config
+            }
+        '''
+        if filtered_df.empty:
+            logging.warning("No records matched the filter keywords")
+            # 0건이어도 항상 동일 스키마 summary를 생성하도록 통일
+            result_df = pd.DataFrame()
+            summary = self._create_summary(result_df)
+            return result_df, summary
+ 
+        logging.info(f"Filtered to {len(filtered_df)} records ({len(filtered_df)/len(self.df)*100:.1f}%)")
+       
+        # 5. 필터링된 데이터에 대해 DefectMatcher 분석
+        logging.info("Phase 2: Defect matching analysis...")
+       
+        # DataFrame을 직접 전달 (Excel 저장/로드 시 텍스트 손실 방지)
+        try:
+            # DefectMatcher로 분석
+            analysis_results = self.defect_matcher.analyze_dataframe(
+                df=filtered_df,
+                text_columns=self.text_columns
+            )
+            logging.info(f"DefectMatcher analysis completed for {len(analysis_results)} records")
+        except Exception as e:
+            logging.error(f"DefectMatcher analysis failed: {e}")
+            raise
+        finally:
+            # 임시 설정 파일 정리
+            Path(temp_config_path).unlink(missing_ok=True)
+       
+        # 6. 결과 통합
+        result_df = self._integrate_results(filtered_df, analysis_results, keyword_evidence)
+       
+        # 7. 요약 정보 생성
+        summary = self._create_summary(result_df)
+       
+        # 8. 결과 저장
+        if output_path is None:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            keywords_str = '_'.join(self._sanitize_filename(kw) for kw in self.filter_keywords[:3])
+            output_path = f"hybrid_analysis_{self.target_complaint_id}_{keywords_str}_{timestamp}.xlsx"
+       
+        self._save_results(result_df, summary, output_path)
+       
+        logging.info(f"Hybrid analysis completed. Results saved to {output_path}")
+       
+        return result_df, summary
+   
+    def _sanitize_filename(self, filename: str) -> str:
+        """파일명에서 안전하지 않은 문자들을 제거하거나 치환"""
+        import re
+        
+        # 파일명에 사용할 수 없는 특수 문자들을 안전한 문자로 치환
+        # * → _star, < → _lt, > → _gt, : → _colon, " → _quote, | → _pipe, ? → _q, / → _slash, \ → _backslash
+        replacements = {
+            '*': '_wildcardstar',
+            '<': '_lt', 
+            '>': '_gt',
+            ':': '_colon',
+            '"': '_quote',
+            '|': '_pipe',
+            '?': '_q',
+            '/': '_slash',
+            '\\': '_backslash'
+        }
+        
+        sanitized = filename
+        for char, replacement in replacements.items():
+            sanitized = sanitized.replace(char, replacement)
+        
+        # 추가로 연속된 특수 문자나 공백을 언더스코어로 치환
+        sanitized = re.sub(r'[^\w\-_.]', '_', sanitized)
+        
+        # 연속된 언더스코어를 하나로 압축
+        sanitized = re.sub(r'_+', '_', sanitized)
+        
+        # 시작/끝의 언더스코어 제거
+        sanitized = sanitized.strip('_')
+        
+        return sanitized
+   
+    def _save_temp_config(self) -> str:
+        """동적 설정을 임시 YAML 파일로 저장"""
+        import yaml
+       
+        temp_path = f"temp_config_{self.target_complaint_id}.yaml"
+       
+        with open(temp_path, 'w', encoding='utf-8') as f:
+            yaml.dump(self.target_config._config, f, default_flow_style=False, allow_unicode=True)
+       
+        return temp_path
+   
+    def _integrate_results(self, filtered_df: pd.DataFrame,
+                          analysis_results: pd.DataFrame,
+                          keyword_evidence: Dict) -> pd.DataFrame:
+        """필터링 결과와 분석 결과 통합"""
+       
+        # 기본 데이터프레임 복사
+        result_df = filtered_df.copy()
+       
+        # 키워드 매칭 정보 추가
+        result_df['Filter_Status'] = 'KEYWORD_MATCHED'
+        result_df['Filter_Keywords_Found'] = ''
+        result_df['Filter_Evidence'] = ''
+        result_df['Filter_Context'] = ''  # 새로운 컬럼: 문맥 포함 증거
+        result_df['Filter_Details'] = ''
+       
+        # DefectMatcher 결과 추가 (인덱스 기반으로 매칭)
+        if len(analysis_results) == len(result_df):
+            for col in ['SameDefect', 'FinalScore', 'Confidence', 'RuleScore', 'SemanticScore',
+                       'Reasoning']:
+                if col in analysis_results.columns:
+                    result_df[col] = analysis_results[col].values
+       
+        # 각 행에 키워드 매칭 정보 추가
+        for idx in result_df.index:
+            # ← 타겟 판별: 증분 마커 없이 Complaint ID로 판별 (Updated: 2025-09-05)
+            is_target = (str(result_df.loc[idx, 'Complaint ID']) == str(self.target_complaint_id))
+            if is_target:
+                result_df.loc[idx, 'Filter_Status'] = 'TARGET_ROW'
+            if idx in keyword_evidence:
+                evidence = keyword_evidence[idx]
+ 
+                # 찾은 키워드들 수집
+                found_keywords = set()
+                match_details = []
+               
+                for col, matches in evidence.items():
+                    if matches and isinstance(matches, list):
+                        for keyword, (matched_word, similarity, start, end) in matches:
+                            found_keywords.add(keyword)
+                            match_details.append({
+                                'column': col,
+                                'keyword': keyword,
+                                'matched_word': matched_word,
+                                'similarity': similarity,
+                                'position': (start, end)
+                            })
+               
+                result_df.loc[idx, 'Filter_Keywords_Found'] = ', '.join(sorted(found_keywords))
+                result_df.loc[idx, 'Filter_Evidence'] = self._format_keyword_evidence(evidence)
+               
+                # 원본 데이터 가져오기 (문맥 추출용)
+                original_row_data = filtered_df.loc[idx].to_dict()
+                result_df.loc[idx, 'Filter_Context'] = self._create_detailed_evidence(evidence, original_row_data)
+               
+                result_df.loc[idx, 'Filter_Details'] = json.dumps(match_details, ensure_ascii=False)
+       
+        return result_df
+   
+    def _create_summary(self, result_df: pd.DataFrame) -> Dict[str, Any]:
+        """분석 요약 정보 생성"""
+        summary = {
+            'total_records': len(self.df) if self.df is not None else 0,
+            'filtered_records': len(result_df),
+            'analyzed_records': len(result_df),
+            'target_complaint_id': self.target_complaint_id,
+            'filter_keywords': self.filter_keywords,
+            'analysis_config': self.analysis_config
+        }
+        # ✅ 결과 유무와 무관하게 타겟 설정 파생 필드 포함 (2025-09-04)
+        if self.target_config:
+            summary['target_config'] = {
+                        'id': self.target_config.id,
+                        'name': self.target_config.name,
+                        'symptoms_count': len(self.target_config.required_symptoms),
+                        'symptoms': self.target_config.required_symptoms,
+                        'action_hints_count': len(self.target_config.action_hints),
+                        'policy': self.target_config.policy
+            }
+ 
+        # 📊 결과가 있을 때만 점수/판정 통계 추가
+        if len(result_df) > 0:
+            # DefectMatcher 결과 통계
+            if 'SameDefect' in result_df.columns:
+                summary['same_defect_true'] = (result_df['SameDefect'] == 'True').sum()
+                summary['same_defect_false'] = (result_df['SameDefect'] == 'False').sum()
+                summary['same_defect_review'] = (result_df['SameDefect'] == 'Review').sum()
+           
+            if 'FinalScore' in result_df.columns:
+                summary['avg_final_score'] = result_df['FinalScore'].mean()
+                summary['max_final_score'] = result_df['FinalScore'].max()
+                summary['min_final_score'] = result_df['FinalScore'].min()
+           
+           
+           
+            # 타겟 설정 정보
+            if self.target_config:
+                summary['target_config'] = {
+                    'id': self.target_config.id,
+                    'name': self.target_config.name,
+                    'symptoms_count': len(self.target_config.required_symptoms),
+                    'symptoms': self.target_config.required_symptoms,
+#-                    'action_hints_count': len(self.target_config.action_hints),
+                    'policy': self.target_config.policy
+                }
+           
+        return summary
+   
+    def _save_results(self, result_df: pd.DataFrame, summary: Dict, output_path: str):
+        """결과를 엑셀 파일로 저장 (여러 시트)"""
+       
+        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+            # 메인 결과 시트
+            result_df.to_excel(writer, sheet_name='Analysis_Results', index=False)
+           
+            # 분석 설정 시트
+            settings_data = self._create_settings_sheet_data(summary)
+            settings_data.to_excel(writer, sheet_name='Analysis_Settings', index=False)
+           
+            # 타겟 설정 시트
+            if self.target_config:
+                target_info = self._create_target_info_sheet()
+                target_info.to_excel(writer, sheet_name='Target_Configuration', index=False)
+           
+            # 키워드 통계 시트
+            keyword_stats = self._create_keyword_statistics(result_df)
+            keyword_stats.to_excel(writer, sheet_name='Keyword_Statistics', index=False)
+           
+            # 분석 결과 통계 시트
+            if 'SameDefect' in result_df.columns:
+                analysis_stats = self._create_analysis_statistics(result_df)
+                analysis_stats.to_excel(writer, sheet_name='Analysis_Statistics', index=False)
+   
+    def _create_settings_sheet_data(self, summary: Dict) -> pd.DataFrame:
+        """분석 설정 정보 시트 데이터 생성"""
+        settings_data = []
+       
+        settings_data.append({
+            'Category': 'Analysis Method',
+            'Setting': 'Method',
+            'Value': self.analysis_config['analysis_method'],
+            'Description': 'Hybrid analysis combining target ID extraction and keyword filtering'
+        })
+       
+        settings_data.append({
+            'Category': 'Target Information',
+            'Setting': 'Target Complaint ID',
+            'Value': self.target_complaint_id,
+            'Description': 'Reference complaint ID used to define target defect type'
+        })
+       
+        settings_data.append({
+            'Category': 'Filtering',
+            'Setting': 'Filter Keywords',
+            'Value': ', '.join(self.filter_keywords),
+            'Description': 'Keywords used for initial data filtering'
+        })
+        settings_data.append({
+            'Category': 'Filtering',
+            'Setting': 'Filtering Mode',
+            'Value': ('none (SBERT-only)' if not self.filter_keywords else 'keywords'),
+            'Description': 'Prefilter mode'
+            })
+       
+        settings_data.append({
+            'Category': 'Filtering',
+            'Setting': 'Similarity Threshold',
+            'Value': str(self.similarity_threshold),
+            'Description': 'Minimum similarity score for fuzzy keyword matching'
+        })
+        # NEW: Matching policy transparency 2025-09-11
+        settings_data.append({
+            'Category': 'Filtering',
+            'Setting': 'Exact-only (explicit)',
+            'Value': ', '.join(sorted(set(self.exact_only_explicit))) or '(none)',
+            'Description': 'Keywords explicitly forced to exact whole-word'
+        })
+        eff_exact, _ = self._split_exact_fuzzy(self.filter_keywords)
+        settings_data.append({
+            'Category': 'Filtering',
+            'Setting': 'Exact-only (effective)',
+            'Value': ', '.join(sorted(eff_exact)) or '(none)',
+            'Description': 'Effective exact-only set after auto-short-exact'
+        })
+        # NLP config summary
+        settings_data.append({
+            'Category': 'NLP Config',
+            'Setting': 'NLP Version',
+            'Value': str(self._nlp_version),
+            'Description': 'Version of nlp_config.yaml used'
+        })
+        sizes = self.analysis_config.get('stopwords_sizes', {})
+        settings_data.append({
+            'Category': 'NLP Config',
+            'Setting': 'Stopwords Sizes',
+            'Value': json.dumps(sizes),
+            'Description': 'Sizes of (global/domain/dataset/allowlist/seeds/effective)'
+        })
+ 
+                                               
+        settings_data.append({
+            'Category': 'Filtering',
+            'Setting': 'Auto Short Exact',
+            'Value': str(self.auto_short_exact),
+            'Description': 'Whether short tokens (len ≤ 3) are auto-marked exact-only'
+        })
+ 
+        settings_data.append({
+            'Category': 'Analysis',
+            'Setting': 'Use SBERT',
+            'Value': str(self.use_sbert),
+            'Description': 'Whether semantic analysis with SBERT was used'
+        })
+       
+        settings_data.append({
+            'Category': 'Analysis',
+            'Setting': 'Alpha (Rule Weight)',
+            'Value': str(self.alpha),
+            'Description': 'Weight for rule-based vs semantic scoring'
+        })
+       
+        settings_data.append({
+            'Category': 'Results',
+            'Setting': 'Total Records',
+            'Value': str(summary.get('total_records', 0)),
+            'Description': 'Total number of records in source data'
+        })
+       
+        settings_data.append({
+            'Category': 'Results',
+            'Setting': 'Filtered Records',
+            'Value': str(summary.get('filtered_records', 0)),
+            'Description': 'Number of records that matched filter keywords'
+        })
+       
+        settings_data.append({
+            'Category': 'Execution',
+            'Setting': 'Timestamp',
+            'Value': self.analysis_config['timestamp'],
+            'Description': 'When this analysis was performed'
+        })
+       
+        return pd.DataFrame(settings_data)
+   
+    def _create_target_info_sheet(self) -> pd.DataFrame:
+        """타겟 설정 정보 시트 생성"""
+        target_data = []
+       
+        target_data.append({
+            'Property': 'Target ID',
+            'Value': self.target_config.id,
+            'Description': 'Dynamically generated target identifier'
+        })
+       
+        target_data.append({
+            'Property': 'Target Name',
+            'Value': self.target_config.name,
+            'Description': 'Human-readable target description'
+        })
+       
+        target_data.append({
+            'Property': 'Required Symptoms',
+            'Value': ', '.join(self.target_config.required_symptoms),
+            'Description': 'Keywords extracted from target complaint as symptoms'
+        })
+       
+#-        target_data.append({
+#-            'Property': 'Action Hints',
+#-            'Value': ', '.join(self.target_config.action_hints),
+#-            'Description': 'Action-related keywords extracted from target complaint'
+#-        })
+       
+        target_data.append({
+            'Property': 'Component Hints',
+            'Value': ', '.join(self.target_config.component_hints),
+            'Description': 'Component-related keywords extracted from target complaint'
+        })
+       
+        target_data.append({
+            'Property': 'Minimum Score',
+            'Value': str(self.target_config.min_score),
+            'Description': 'Minimum score threshold for positive classification'
+        })
+       
+        target_data.append({
+            'Property': 'Review Band',
+            'Value': f"{self.target_config.review_band[0]} - {self.target_config.review_band[1]}",
+            'Description': 'Score range requiring human review'
+        })
+       
+        return pd.DataFrame(target_data)
+   
+    def _create_keyword_statistics(self, result_df: pd.DataFrame) -> pd.DataFrame:
+        """키워드 매칭 통계 생성"""
+        stats_data = []
+       
+        for keyword in self.filter_keywords:
+            keyword_matches = 0
+            column_matches = {col: 0 for col in self.text_columns}
+           
+            for idx, row in result_df.iterrows():
+                keywords_found = str(row.get('Filter_Keywords_Found', '')).lower()
+                if keyword in keywords_found:
+                    keyword_matches += 1
+               
+                # 컬럼별 매칭 확인
+                filter_evidence = str(row.get('Filter_Evidence', ''))
+                for col in self.text_columns:
+                    col_short = col.split('(')[0].strip()
+                    if col_short in filter_evidence and keyword in filter_evidence.lower():
+                        column_matches[col] += 1
+           
+            stats_data.append({
+                'Filter_Keyword': keyword,
+                'Total_Matches': keyword_matches,
+                'Match_Rate': f"{keyword_matches/len(result_df)*100:.1f}%" if len(result_df) > 0 else "0%",
+                'Customer_Matches': column_matches[self.text_columns[0]],
+                'FE_Matches': column_matches[self.text_columns[1]],
+                'Actions_Matches': column_matches[self.text_columns[2]],
+                'Test_Matches': column_matches[self.text_columns[3]]
+            })
+       
+        return pd.DataFrame(stats_data)
+   
+    def _create_analysis_statistics(self, result_df: pd.DataFrame) -> pd.DataFrame:
+        """분석 결과 통계 생성"""
+        stats_data = []
+       
+        if 'SameDefect' in result_df.columns:
+            same_defect_counts = result_df['SameDefect'].value_counts()
+            for decision, count in same_defect_counts.items():
+                percentage = count / len(result_df) * 100
+                stats_data.append({
+                    'Metric': f'SameDefect_{decision}',
+                    'Count': count,
+                    'Percentage': f"{percentage:.1f}%",
+                    'Description': f"Records classified as {decision}"
+                })
+       
+        if 'FinalScore' in result_df.columns:
+            stats_data.extend([
+                {
+                    'Metric': 'Average_FinalScore',
+                    'Count': f"{result_df['FinalScore'].mean():.3f}",
+                    'Percentage': '',
+                    'Description': 'Mean final score across all analyzed records'
+                },
+                {
+                    'Metric': 'Max_FinalScore',
+                    'Count': f"{result_df['FinalScore'].max():.3f}",
+                    'Percentage': '',
+                    'Description': 'Highest final score achieved'
+                },
+                {
+                    'Metric': 'Min_FinalScore',
+                    'Count': f"{result_df['FinalScore'].min():.3f}",
+                    'Percentage': '',
+                    'Description': 'Lowest final score achieved'
+                }
+            ])
+       
+        return pd.DataFrame(stats_data)
+ 
+def main():
+    """테스트용 메인 함수"""
+    import argparse
+   
+    parser = argparse.ArgumentParser(description='Hybrid analysis: Target ID + Keywords + Full Scoring')
+    parser.add_argument('--file', '-f', required=True, help='Excel file path')
+    parser.add_argument('--target-id', '-t', required=True, help='Target Complaint ID')
+    parser.add_argument('--keywords', '-k', required=True, help='Filter keywords (comma-separated)')
+    parser.add_argument('--sheet', '-s', default='Sheet1', help='Sheet name')
+    parser.add_argument('--output', '-o', help='Output file path')
+    parser.add_argument('--threshold', type=float, default=0.7, help='Similarity threshold')
+    parser.add_argument('--use-sbert', action='store_true', help='Use SBERT analysis')
+    parser.add_argument('--alpha', type=float, default=0.5, help='Rule vs semantic weight')
+    parser.add_argument('--min-score', type=float, help='Minimum score threshold for positive classification')
+    parser.add_argument('--review-band', type=str, help='Review band range (format: "lower,upper", e.g., "0.55,0.60")')
+    parser.add_argument('--require-symptom', type=lambda x: x.lower() == 'true', help='Require symptom presence (true/false)')
+    parser.add_argument('--treat-resolved-as-match', type=lambda x: x.lower() == 'true', help='Treat resolved cases as matches (true/false)')
+    parser.add_argument('--verbose', '-v', action='store_true', help='Verbose logging')
+   
+    args = parser.parse_args()
+   
+    # 로깅 설정
+    level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(level=level, format='%(asctime)s - %(levelname)s - %(message)s')
+   
+    try:
+        # CLI 인수에서 임계값 설정 파싱
+        threshold_kwargs = {}
+       
+        if args.min_score is not None:
+            threshold_kwargs['min_score'] = args.min_score
+       
+        if args.review_band is not None:
+            try:
+                lower, upper = map(float, args.review_band.split(','))
+                threshold_kwargs['review_band'] = (lower, upper)
+            except ValueError:
+                raise ValueError(f"Invalid review-band format: {args.review_band}. Use 'lower,upper' (e.g., '0.55,0.60')")
+       
+        if args.require_symptom is not None:
+            threshold_kwargs['require_symptom'] = args.require_symptom
+       
+        if args.treat_resolved_as_match is not None:
+            threshold_kwargs['treat_resolved_as_match'] = args.treat_resolved_as_match
+       
+        # 하이브리드 매처 생성 및 실행
+        matcher = HybridMatcher(
+            excel_path=args.file,
+            target_complaint_id=args.target_id,
+            filter_keywords=args.keywords,
+            similarity_threshold=args.threshold,
+            use_sbert=args.use_sbert,
+            alpha=args.alpha,
+            **threshold_kwargs
+        )
+       
+        result_df, summary = matcher.analyze_excel(
+            sheet_name=args.sheet,
+            output_path=args.output
+        )
+       
+        # 결과 출력
+        print(f"\n=== Hybrid Analysis Summary ===")
+        print(f"Target Complaint ID: {summary['target_complaint_id']}")
+        print(f"Filter Keywords: {', '.join(summary['filter_keywords'])}")
+        print(f"Total records: {summary['total_records']}")
+        print(f"Filtered records: {summary['filtered_records']}")
+        print(f"Filter rate: {summary['filtered_records']/summary['total_records']*100:.1f}%")
+       
+        # 임계값 설정 출력
+        if 'threshold_overrides' in summary['analysis_config'] and summary['analysis_config']['threshold_overrides']:
+            print(f"\nThreshold Overrides Applied:")
+            for key, value in summary['analysis_config']['threshold_overrides'].items():
+                print(f"  {key}: {value}")
+       
+        if 'same_defect_true' in summary:
+            print(f"\nDefect Matching Results:")
+            print(f"  Same Defect (True): {summary['same_defect_true']}")
+            print(f"  Different Defect (False): {summary['same_defect_false']}")
+            print(f"  Review Required: {summary['same_defect_review']}")
+            print(f"  Average Final Score: {summary.get('avg_final_score', 0):.3f}")
+       
+        return 0
+       
+    except Exception as e:
+        logging.error(f"Analysis failed: {e}")
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
+        return 1
+ 
+if __name__ == '__main__':
+    exit(main())
