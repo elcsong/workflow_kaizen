@@ -141,8 +141,9 @@ class DynamicTargetConfig:
                 # \w = [a-zA-Z0-9_], 하이픈과 슬래시도 유지
                 # 예: 'double image' → ['double', 'image']
                 #     'double_image' → ['double_image']
+                # 단, stopwords인 토큰은 제외 (노이즈 방지)
                 for tok in re.split(r'[^\w\-\/]+', s):
-                    if tok and tok not in seeds:
+                    if tok and tok not in seeds and tok not in self._effective_stopwords:
                         seeds.append(tok)
         
         logging.info(f"[DynamicConfig Debug] seeds (after tokenization, before stopwords filter): {seeds}")
@@ -395,6 +396,9 @@ class HybridMatcher:
             sw_domain = set()
         self._allowlist = _to_set(nlp.get('allowlist', []))
 
+        # 기본 stopwords 계산 (allowlist만 제외)
+        base_stopwords = (sw_global | sw_domain | sw_dataset) - self._allowlist
+
         # seeds (from --keywords): 원본 키워드
         seeds_original = set(self._parse_keywords(self.filter_keywords))
         
@@ -402,7 +406,7 @@ class HybridMatcher:
         logging.info(f"[Stopwords Debug] filter_keywords raw: {self.filter_keywords}")
         logging.info(f"[Stopwords Debug] seeds_original: {seeds_original}")
         
-        # 토큰화된 키워드도 보호 (DynamicTargetConfig와 동일한 토큰화 로직)
+        # 토큰화된 키워드도 보호 (단, 이미 stopwords인 단어는 제외)
         seeds_tokenized = set()
         for s in seeds_original:
             s = str(s).strip().lower()
@@ -413,17 +417,19 @@ class HybridMatcher:
                 # 복합어는 토큰화 (언더스코어로 연결된 단어는 유지)
                 # \w = [a-zA-Z0-9_], 하이픈과 슬래시도 유지
                 for tok in re.split(r'[^\w\-\/]+', s):
-                    if tok:
+                    # stopwords가 아닌 토큰만 seeds에 추가 (노이즈 방지)
+                    if tok and tok not in base_stopwords:
                         seeds_tokenized.add(tok)
         
-        # seeds = 원본 + 토큰화
+        # seeds = 원본 + 토큰화 (stopwords 제외)
         seeds = seeds_original | seeds_tokenized
         
         # 디버깅: 최종 seeds 로그
+        logging.info(f"[Stopwords Debug] base_stopwords count: {len(base_stopwords)}")
         logging.info(f"[Stopwords Debug] seeds_tokenized: {seeds_tokenized}")
         logging.info(f"[Stopwords Debug] seeds (combined): {seeds}")
        
-        effective = (sw_global | sw_domain | sw_dataset) - self._allowlist - seeds
+        effective = base_stopwords - seeds
         self._effective_stopwords = effective
         # 기록
         self.analysis_config['nlp_version'] = self._nlp_version
