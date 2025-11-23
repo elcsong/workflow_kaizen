@@ -21,28 +21,19 @@ class KeywordBasedMatcher:
                  keywords: str,
                  similarity_threshold: float = 0.9,
                  use_sbert: bool = True,
-                 alpha: float = 0.5,
-                 exclude_keywords: str = '',
-                 nlp_config_path: str = None):
+                 alpha: float = 0.5):
         """
         Args:
             keywords: 콤마로 구분된 필터링 키워드 (예: "blood,bleed,crystal")
             similarity_threshold: 유사 키워드 매칭 임계값
             use_sbert: SBERT 사용 여부
             alpha: 룰 vs 의미 점수 가중치
-            exclude_keywords: 제외할 키워드 구문 (콤마 구분, 예: "double click,mirror mode")
-            nlp_config_path: nlp_config.yaml 경로 (stopwords 로드용)
         """
         self.raw_keywords = keywords
         self.keywords = self._parse_keywords(keywords)
         self.similarity_threshold = similarity_threshold
         self.use_sbert = use_sbert
         self.alpha = alpha
-        self.exclude_keywords = self._parse_exclude_keywords(exclude_keywords)
-        self.nlp_config_path = nlp_config_path
-       
-        # Stopwords 로드
-        self.stopwords = self._load_stopwords(nlp_config_path)
        
         # 분석 설정 저장
         self.analysis_config = {
@@ -50,24 +41,19 @@ class KeywordBasedMatcher:
             'similarity_threshold': similarity_threshold,
             'use_sbert': use_sbert,
             'alpha': alpha,
-            'exclude_keywords': self.exclude_keywords,
-            'nlp_config_path': nlp_config_path or '(default)',
             'analysis_method': 'Keyword-Based Filtering + Semantic Analysis',
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
        
-        # 텍스트 컬럼 정의 (5개로 확장)
+        # 텍스트 컬럼 정의
         self.text_columns = [
             'Customers Issue Description(Full)',
             "FE's Issue Description(Full)",
             'Actions Taken / Repairs(Full)',
-            'Repair Test / Inspection Data(Full)',
-            'Additional Information(Full)'
+            'Repair Test / Inspection Data(Full)'
         ]
        
         logging.info(f"KeywordBasedMatcher initialized with keywords: {self.keywords}")
-        if self.exclude_keywords:
-            logging.info(f"Exclude keywords: {self.exclude_keywords}")
    
     def _parse_keywords(self, keywords_str: str) -> List[str]:
         """콤마로 구분된 키워드 문자열을 리스트로 변환"""
@@ -78,150 +64,6 @@ class KeywordBasedMatcher:
         keywords = [kw for kw in keywords if kw]  # 빈 문자열 제거
        
         return keywords
-   
-    def _parse_exclude_keywords(self, exclude_str: str) -> List[str]:
-        """콤마로 구분된 exclude keywords 파싱"""
-        if not exclude_str:
-            return []
-        keywords = [kw.strip().lower() for kw in exclude_str.split(',')]
-        return [kw for kw in keywords if kw]
-   
-    def _load_stopwords(self, nlp_config_path: str) -> set:
-        """nlp_config.yaml에서 stopwords 로드"""
-        if not nlp_config_path or not Path(nlp_config_path).exists():
-            # 기본 stopwords
-            return {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 
-                    'to', 'for', 'of', 'with', 'from', 'by', 'is', 'was', 'are', 'were'}
-       
-        try:
-            import yaml
-            with open(nlp_config_path, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
-           
-            nlp = config.get('nlp', {})
-            sw = nlp.get('stopwords', {})
-           
-            # global ∪ domain ∪ dataset
-            stopwords = set()
-            for key in ['global', 'domain', 'dataset']:
-                items = sw.get(key, [])
-                if isinstance(items, list):
-                    stopwords.update([str(item).strip().lower() for item in items])
-           
-            # allowlist 제외
-            allowlist_items = nlp.get('allowlist', [])
-            allowlist = set()
-            if isinstance(allowlist_items, list):
-                for item in allowlist_items:
-                    allowlist.update([w.strip().lower() for w in str(item).split()])
-           
-            # seeds(사용자 키워드) 보호
-            seeds = set(self.keywords)
-           
-            result = (stopwords - allowlist) - seeds
-            logging.info(f"Loaded {len(result)} stopwords from {nlp_config_path}")
-            return result
-        except Exception as e:
-            logging.warning(f"Failed to load stopwords from {nlp_config_path}: {e}")
-            return {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 
-                    'to', 'for', 'of', 'with', 'from', 'by', 'is', 'was', 'are', 'were'}
-   
-    def _is_excluded(self, text: str) -> bool:
-        """텍스트가 exclude_keywords에 포함되는지 확인"""
-        if not text or not self.exclude_keywords:
-            return False
-        text_lower = text.lower()
-        for exclude_kw in self.exclude_keywords:
-            if exclude_kw in text_lower:
-                return True
-        return False
-   
-    def _extract_short_context(self, text: str, start: int, end: int, window: int = 2) -> str:
-        """
-        매칭 키워드 중심 앞뒤 1-2단어 추출 (stopword 제거)
-       
-        Args:
-            text: 전체 텍스트
-            start: 매칭 시작 위치
-            end: 매칭 끝 위치
-            window: 앞뒤로 추출할 단어 개수
-       
-        Returns:
-            짧은 구문 문자열
-        """
-        if not text:
-            return ""
-       
-        # 매칭된 단어
-        matched_word = text[start:end]
-       
-        # 전체 텍스트를 단어로 분리
-        word_pattern = re.compile(r'\b\w+\b')
-        word_matches = list(word_pattern.finditer(text))
-       
-        if not word_matches:
-            return matched_word
-       
-        # 매칭 단어의 인덱스 찾기
-        matched_idx = None
-        for i, match in enumerate(word_matches):
-            if match.start() <= start < match.end():
-                matched_idx = i
-                break
-       
-        if matched_idx is None:
-            return matched_word
-       
-        # 앞뒤 window 크기만큼 추출
-        start_idx = max(0, matched_idx - window)
-        end_idx = min(len(word_matches), matched_idx + window + 1)
-       
-        # 단어 추출 및 stopword 제거
-        context_words = []
-        for i in range(start_idx, end_idx):
-            word = word_matches[i].group()
-            # 매칭된 단어는 항상 포함, 나머지는 stopword 체크
-            if i == matched_idx or word.lower() not in self.stopwords:
-                context_words.append(word)
-       
-        return ' '.join(context_words) if context_words else matched_word
-   
-    def _extract_sentence_context(self, text: str, start: int, end: int) -> str:
-        """
-        매칭 키워드가 포함된 완전한 문장 추출
-       
-        Args:
-            text: 전체 텍스트
-            start: 매칭 시작 위치
-            end: 매칭 끝 위치
-       
-        Returns:
-            완전한 문장 문자열
-        """
-        if not text:
-            return ""
-       
-        # 문장 경계 구분자: 마침표, 세미콜론, 개행
-        sentence_delimiters = r'[.;\n]'
-       
-        # 문장들로 분리
-        sentences = re.split(sentence_delimiters, text)
-       
-        # 각 문장의 원본 텍스트 내 위치 계산
-        current_pos = 0
-        for sentence in sentences:
-            sentence_start = current_pos
-            sentence_end = sentence_start + len(sentence)
-           
-            # 매칭 위치가 이 문장 안에 있는지 확인
-            if sentence_start <= start < sentence_end:
-                return sentence.strip()
-           
-            # 다음 문장으로 (구분자 길이 1 추가)
-            current_pos = sentence_end + 1
-       
-        # 못 찾으면 전체 텍스트 반환
-        return text.strip()
    
     def _generate_keyword_variants(self, keyword: str) -> List[str]:
         """키워드의 다양한 변형 생성 (유사문자, 어간 변화 등)"""
@@ -463,8 +305,6 @@ class KeywordBasedMatcher:
         # 키워드 매칭 정보 추가
         result_df['Keyword_Filter_Status'] = 'MATCHED'
         result_df['Keywords_Found'] = ''
-        result_df['Matched_Phrases'] = ''
-        result_df['Matched_Sentences'] = ''
         result_df['Match_Evidence'] = ''
         result_df['Match_Details'] = ''
        
@@ -476,14 +316,9 @@ class KeywordBasedMatcher:
                 # 찾은 키워드들 수집
                 found_keywords = set()
                 match_details = []
-                matched_phrases = set()
-                matched_sentences = set()
                
                 for col, matches in evidence.items():
                     if matches and isinstance(matches, list):
-                        # 원본 텍스트 가져오기
-                        text = str(result_df.loc[idx, col]) if col in result_df.columns else ""
-                       
                         for keyword, (matched_word, similarity, start, end) in matches:
                             found_keywords.add(keyword)
                             match_details.append({
@@ -493,20 +328,8 @@ class KeywordBasedMatcher:
                                 'similarity': similarity,
                                 'position': (start, end)
                             })
-                           
-                            # 문맥 추출
-                            short_ctx = self._extract_short_context(text, start, end)
-                            sentence_ctx = self._extract_sentence_context(text, start, end)
-                           
-                            # exclude_keywords 체크
-                            if not self._is_excluded(short_ctx):
-                                matched_phrases.add(short_ctx)
-                            if not self._is_excluded(sentence_ctx):
-                                matched_sentences.add(sentence_ctx)
                
                 result_df.loc[idx, 'Keywords_Found'] = ', '.join(sorted(found_keywords))
-                result_df.loc[idx, 'Matched_Phrases'] = ' | '.join(sorted(matched_phrases))
-                result_df.loc[idx, 'Matched_Sentences'] = ' | '.join(sorted(matched_sentences))
                 result_df.loc[idx, 'Match_Evidence'] = self._format_evidence(evidence)
                
                 # 상세 매칭 정보 (JSON 형태로 저장)
@@ -542,10 +365,6 @@ class KeywordBasedMatcher:
             # 키워드 매칭 통계 시트
             keyword_stats = self._create_keyword_statistics(result_df)
             keyword_stats.to_excel(writer, sheet_name='Keyword_Statistics', index=False)
-           
-            # 키워드 문맥 분석 시트 (신규)
-            context_analysis = self._create_context_analysis_sheet(result_df)
-            context_analysis.to_excel(writer, sheet_name='Keyword_Context_Analysis', index=False)
        
         logging.info(f"Results saved to {output_path}")
        
@@ -583,34 +402,7 @@ class KeywordBasedMatcher:
             })
        
         return pd.DataFrame(stats_data)
-   
-    def _create_context_analysis_sheet(self, result_df: pd.DataFrame) -> pd.DataFrame:
-        """전체 데이터의 키워드별 unique 문맥 수집"""
-        stats_data = []
-       
-        for keyword in self.keywords:
-            contexts = []
-           
-            # 모든 행에서 해당 키워드의 문맥 수집
-            for idx, row in result_df.iterrows():
-                phrases_str = str(row.get('Matched_Phrases', ''))
-                if phrases_str and phrases_str != '':
-                    phrases = phrases_str.split(' | ')
-                    for phrase in phrases:
-                        if phrase and keyword in phrase.lower():
-                            contexts.append(phrase)
-           
-            # Unique 문맥만
-            unique_contexts = list(set(contexts))
-           
-            stats_data.append({
-                'Keyword': keyword,
-                'Context_Examples': ', '.join(unique_contexts[:10]),  # 최대 10개
-                'Occurrence_Count': len(contexts)
-            })
-       
-        return pd.DataFrame(stats_data)
-
+ 
 def main():
     """테스트용 메인 함수"""
     import argparse

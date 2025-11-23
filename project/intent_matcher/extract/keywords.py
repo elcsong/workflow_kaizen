@@ -37,7 +37,7 @@ class KeywordExtractor:
         self.case_sensitive = False
        
     def _create_pattern(self, keywords: List[str]) -> re.Pattern:
-        """키워드 리스트로부터 정규식 패턴 생성 (와일드카드 지원)"""
+        """키워드 리스트로부터 정규식 패턴 생성 (와일드카드, 구문, 어간 변화 지원)"""
         if not keywords:
             return None
        
@@ -51,9 +51,20 @@ class KeywordExtractor:
                 # 와일드카드 패턴: duplicat* → duplicat\w*
                 base = re.escape(keyword[:-1])  # '*' 제거 후 이스케이프
                 pattern_parts.append(f"{base}\\w*")
+            elif ' ' in keyword:
+                # 공백 포함 구문: "double image" → double\s+image
+                # 각 단어를 이스케이프하고 공백을 \s+로 치환
+                words = keyword.split()
+                escaped_words = [re.escape(w) for w in words]
+                phrase_pattern = r'\s+'.join(escaped_words)
+                pattern_parts.append(phrase_pattern)
             else:
-                # 완전 매칭
-                pattern_parts.append(re.escape(keyword))
+                # 기본 어간 변화 지원: mirror → mirror(s|ed|ing)?
+                # 프리필터와의 일관성을 위해 기본적인 변형 자동 지원
+                base = re.escape(keyword)
+                # 일반적인 어간 변화 패턴 추가
+                # -s, -es, -ed, -ing, -d (간단한 변형)
+                pattern_parts.append(f"{base}(?:s|es|ed|ing|d)?")
        
         # 단어 경계를 고려한 패턴 생성
         pattern = r'\b(?:' + '|'.join(pattern_parts) + r')\b'

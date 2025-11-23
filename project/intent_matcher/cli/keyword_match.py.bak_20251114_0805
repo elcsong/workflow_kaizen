@@ -104,17 +104,6 @@ def parse_arguments():
         help='상세 로그 출력'
     )
    
-    parser.add_argument(
-        '--exclude-keywords', '-e',
-        default='',
-        help='제외할 키워드 구문 (콤마로 구분, 예: "double click,mirror mode")'
-    )
-   
-    parser.add_argument(
-        '--nlp-config',
-        help='nlp_config.yaml 경로 (stopwords 로드용)'
-    )
-   
     return parser.parse_args()
  
 def validate_arguments(args):
@@ -212,9 +201,7 @@ def main():
             keywords=args.keywords,
             similarity_threshold=args.threshold,
             use_sbert=args.use_sbert,
-            alpha=args.alpha,
-            exclude_keywords=args.exclude_keywords,
-            nlp_config_path=args.nlp_config
+            alpha=args.alpha
         )
        
         # 분석 실행
@@ -241,7 +228,6 @@ def main():
         print(f"   📊 Analysis_Results 시트: 필터링된 데이터 및 매칭 정보")
         print(f"   ⚙️  Analysis_Settings 시트: 분석 설정 및 매개변수")
         print(f"   📈 Keyword_Statistics 시트: 키워드별 매칭 통계")
-        print(f"   🔍 Keyword_Context_Analysis 시트: 키워드별 문맥 분석")
        
         # 추가 안내
         if len(result_df) > 0:

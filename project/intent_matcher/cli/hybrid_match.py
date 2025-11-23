@@ -167,7 +167,9 @@ def parse_arguments():
     parser.add_argument('--nlp-config', type=str, help='Path to nlp_config.yaml (stopwords/allowlist/regex)')
     parser.add_argument('--no-domain-stopwords', action='store_true',
                         help='Disable built-in domain stopwords (use only global/dataset)')
- 
+    parser.add_argument('--exclude-keywords', '-e', default='',
+                        help='제외할 키워드 구문 (콤마로 구분, 예: "double click,mirror mode")')
+
     parser.add_argument(
         '--verbose', '-v',
         action='store_true',

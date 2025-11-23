@@ -37,7 +37,10 @@ class DynamicTargetConfig:
         self._config = self._build_config()
    
     def _extract_keywords_from_text(self, text: str, min_length: int = 3) -> List[str]:
-        """텍스트에서 키워드 추출"""
+        """텍스트에서 키워드 추출
+        증상/조치/부품 키워드를 문맥에서 자동 추출하는 기능으로 현재는 사용자가 --keywords를 지정하지 않을 때만 백업으로 사용
+        실제 stopwords는 nlp_config.yaml에 정의되어 있습니다.
+        """
         if not text or pd.isna(text):
             return []
        
@@ -67,12 +70,13 @@ class DynamicTargetConfig:
    
     def _build_config(self) -> Dict[str, Any]:
         """타겟 데이터에서 설정 구성"""
-        # 텍스트 컬럼들
+        # 텍스트 컬럼들 (5개)
         text_columns = [
             'Customers Issue Description(Full)',
             "FE's Issue Description(Full)",
             'Actions Taken / Repairs(Full)',
-            'Repair Test / Inspection Data(Full)'
+            'Repair Test / Inspection Data(Full)',
+            'Additional Information(Full)'
         ]
        
         # 각 컬럼에서 키워드 추출
@@ -136,11 +140,21 @@ class DynamicTargetConfig:
             if '*' in s:
                 if s not in seeds:
                     seeds.append(s)
+            # 공백 포함 구문(phrase)은 그대로 보존하되, 개별 토큰도 추가
+            # (하이브리드 필터에서는 구문으로, KeywordExtractor에서는 개별 단어로 매칭)
+            elif ' ' in s:
+                if s not in seeds and s not in self._effective_stopwords:
+                    seeds.append(s)
+                # 구문의 개별 단어도 추가 (KeywordExtractor 호환성)
+                for tok in s.split():
+                    tok = tok.strip()
+                    if tok and tok not in seeds and tok not in self._effective_stopwords:
+                        seeds.append(tok)
             else:
-                # 복합어는 토큰화 (언더스코어로 연결된 단어는 유지)
+                # 단일 단어만 토큰화 (언더스코어로 연결된 단어는 유지)
                 # \w = [a-zA-Z0-9_], 하이픈과 슬래시도 유지
-                # 예: 'double image' → ['double', 'image']
-                #     'double_image' → ['double_image']
+                # 예: 'double-clicking' → ['double', 'clicking'] (하이픈 분리)
+                #     'double_image' → ['double_image'] (언더스코어 유지)
                 # 단, stopwords인 토큰은 제외 (노이즈 방지)
                 for tok in re.split(r'[^\w\-\/]+', s):
                     if tok and tok not in seeds and tok not in self._effective_stopwords:
@@ -413,8 +427,17 @@ class HybridMatcher:
             if '*' in s:
                 # 와일드카드는 그대로
                 seeds_tokenized.add(s)
+            # 공백 포함 구문(phrase)은 그대로 보존하되, 개별 토큰도 추가
+            elif ' ' in s:
+                if s not in base_stopwords:
+                    seeds_tokenized.add(s)
+                # 구문의 개별 단어도 추가
+                for tok in s.split():
+                    tok = tok.strip()
+                    if tok and tok not in base_stopwords:
+                        seeds_tokenized.add(tok)
             else:
-                # 복합어는 토큰화 (언더스코어로 연결된 단어는 유지)
+                # 단일 단어만 토큰화 (언더스코어로 연결된 단어는 유지)
                 # \w = [a-zA-Z0-9_], 하이픈과 슬래시도 유지
                 for tok in re.split(r'[^\w\-\/]+', s):
                     # stopwords가 아닌 토큰만 seeds에 추가 (노이즈 방지)
@@ -451,32 +474,78 @@ class HybridMatcher:
         return keywords
     '''
     def _parse_keywords(self, keywords: Any) -> List[str]:
-        """키워드를 리스트[str]로 정규화 (str | list 모두 허용)"""
+        """키워드를 리스트[str]로 정규화 (str | list 모두 허용)
+        
+        따옴표로 묶인 구문은 하나의 키워드로 보존:
+        예: 'double,"double image",mirror' -> ['double', 'double image', 'mirror']
+        """
         if keywords is None:
             return []
         if isinstance(keywords, list):
             return [str(k).strip().lower() for k in keywords if str(k).strip()]
-        # 문자열인 경우 콤마 분리
-        return [kw.strip().lower() for kw in str(keywords).split(',') if kw.strip()]
+        
+        # 문자열인 경우: 따옴표로 묶인 구문 보호하며 콤마 분리
+        keywords_str = str(keywords)
+        parsed = []
+        current = []
+        in_quotes = False
+        quote_char = None
+        
+        for i, char in enumerate(keywords_str):
+            if char in ('"', "'") and (i == 0 or keywords_str[i-1] != '\\'):
+                if not in_quotes:
+                    in_quotes = True
+                    quote_char = char
+                elif char == quote_char:
+                    in_quotes = False
+                    quote_char = None
+                else:
+                    current.append(char)
+            elif char == ',' and not in_quotes:
+                # 콤마를 만났고 따옴표 밖이면 키워드 구분
+                keyword = ''.join(current).strip().lower()
+                if keyword:
+                    parsed.append(keyword)
+                current = []
+            else:
+                current.append(char)
+        
+        # 마지막 키워드 추가
+        keyword = ''.join(current).strip().lower()
+        if keyword:
+            parsed.append(keyword)
+        
+        return parsed
  
     # NEW: split keyword set -> exact-only vs fuzzy 2025-09-11
     def _split_exact_fuzzy(self, keywords: List[str]) -> Tuple[set, set]:
+        """키워드를 exact-only와 fuzzy 매칭 그룹으로 분리
+        
+        exact-only: 정확히 일치해야 매칭되는 키워드 (주로 짧은 약어)
+        fuzzy: 유사도 기반 매칭이 가능한 키워드 (구문 포함)
+        """
         kw_all = {k.strip().lower() for k in keywords if k.strip()}
         exact = set(self.exact_only_explicit)
         if self.auto_short_exact:
-            # 1글자 제외, 2~3자 약어 자동 exact
+            # 1글자 제외, 2~3자 약어 자동 exact (단, 구문은 제외)
             exact |= {k for k in kw_all if 2 <= len(k) <= 3 and " " not in k and "-" not in k and "/" not in k}
-        # only single tokens remain in exact; phrases stay in fuzzy
+        # only single tokens remain in exact; phrases and hyphenated words stay in fuzzy
         exact = {k for k in exact if " " not in k and "-" not in k and "/" not in k}
         fuzzy = kw_all - exact
         return exact, fuzzy
  
     # NEW: exact-only whole-word matcher (case-insensitive, alnum boundary) 2025-09-11
     def _exact_match_keyword(self, text: str, keyword: str) -> List[Tuple[str, float, int, int]]:
+        """정확한 매칭만 수행 (단어 경계 기준)
+        
+        단일 단어 및 구문(phrase) 키워드 모두 지원
+        """
         if not text or not keyword:
             return []
+        
+        # 단어 경계(\b)를 사용한 정확한 매칭
         pat = re.compile(rf"\b{re.escape(keyword)}\b", re.IGNORECASE)
-        #pat = re.compile(rf"(?<![0-9A-Za-z]){re.escape(keyword)}(?![0-9A-Za-z])", re.IGNORECASE)
+        
         out = []
         for m in pat.finditer(text):
             out.append((m.group(), 1.0, m.start(), m.end()))
@@ -544,13 +613,18 @@ class HybridMatcher:
         return list(set(variants))
    
     def _fuzzy_match_keyword(self, text: str, keyword: str) -> List[Tuple[str, float, int, int]]:
-        """텍스트에서 키워드와 유사한 단어들을 찾기"""
+        """텍스트에서 키워드와 유사한 단어들을 찾기
+        
+        개선 사항:
+        - 구문(phrase) 키워드 지원
+        - 하이픈 복합어 부분 매칭 지원 (예: "double"이 "double-clicking"도 매칭)
+        """
         if not text or not keyword:
             return []
        
         matches = []
         text_lower = text.lower()
- 
+
         # [추가] 0) 먼저 다단어(phrase) 키워드는 '문장 그대로' 찾습니다 (2025-09-04)
         kw_stripped = keyword.strip()
         if " " in kw_stripped:  # 공백 포함 ⇒ 문구 키워드
@@ -560,6 +634,7 @@ class HybridMatcher:
             # 문구가 하나라도 잡히면 충분하므로 바로 반환(원하시면 주석 처리 가능)
             if matches:
                 return matches
+        
         # [변경] 토큰 정규식: 하이픈(-), 슬래시(/) 포함 토큰을 허용 (2025-09-04)
         #words = re.findall(r'\b\w+\b', text_lower)
         words = re.findall(r'\b[\w\-\/]+\b', text_lower)
@@ -567,13 +642,24 @@ class HybridMatcher:
         keyword_variants = self._generate_keyword_variants(keyword)
        
         for word in set(words):
-            # 정확한 매치 확인
+            # 1) 정확한 매치 확인
             if any(variant.lower() == word for variant in keyword_variants):
                 pattern = re.compile(r'\b' + re.escape(word) + r'\b', re.IGNORECASE)
                 for match in pattern.finditer(text):
                     matches.append((match.group(), 1.0, match.start(), match.end()))
+            # 2) 하이픈 복합어 부분 매칭 (예: "double"이 "double-clicking"의 일부)
+            elif '-' in word or '/' in word:
+                # 하이픈이나 슬래시로 분리된 각 부분도 확인
+                parts = re.split(r'[-/]', word)
+                for part in parts:
+                    if any(variant.lower() == part for variant in keyword_variants):
+                        # 부분 매칭이므로 유사도는 0.9로 설정
+                        pattern = re.compile(r'\b' + re.escape(word) + r'\b', re.IGNORECASE)
+                        for match in pattern.finditer(text):
+                            matches.append((match.group(), 0.9, match.start(), match.end()))
+                        break  # 한 부분이라도 매칭되면 더 이상 확인 안 함
             else:
-                # 유사도 매칭
+                # 3) 유사도 매칭
                 for variant in keyword_variants:
                     similarity = difflib.SequenceMatcher(None, word, variant.lower()).ratio()
                     if similarity >= self.similarity_threshold:

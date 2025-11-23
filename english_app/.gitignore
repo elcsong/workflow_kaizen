@@ -1,0 +1,9 @@
+# Ignore data files
+data/videos/
+data/audio/
+data/sessions/
+
+# Ignore python cache
+__pycache__/
+*.pyc
+
