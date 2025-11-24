@@ -5,13 +5,13 @@ from anthropic import Anthropic
 
 # Model Map (Friendly Name -> API Model ID)
 MODELS = {
+    "OpenAI": {
+        "GPT-5 mini": "gpt-5-mini-2025-08-07",
+        "GPT-5.1": "gpt-5.1-2025-11-13",
+    },
     "Gemini": {
         "Gemini 2.5 Pro": "gemini-2.5-pro",
         "Gemini 2.5 Flash": "gemini-2.5-flash",
-    },
-    "OpenAI": {
-        "GPT-5.1": "gpt-5.1-2025-11-13",
-        "GPT-5 mini": "gpt-5-mini-2025-08-07",
     },
     "Anthropic": {
         "Claude 4.5 Sonnet": "claude-sonnet-4-5",

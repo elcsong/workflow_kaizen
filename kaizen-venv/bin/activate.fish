@@ -29,7 +29,7 @@ end
 # Unset irrelevant variables.
 deactivate nondestructive
 
-set -gx VIRTUAL_ENV "/Users/chikang/projects/win_workflow_kaizen/kaizen-venv"
+set -gx VIRTUAL_ENV "/Users/chikang/projects/my_kaizen/kaizen-venv"
 
 set -gx _OLD_VIRTUAL_PATH $PATH
 set -gx PATH "$VIRTUAL_ENV/bin" $PATH

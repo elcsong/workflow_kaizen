@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import os
 import yt_dlp
@@ -26,8 +27,8 @@ TIPS = {
     * **Step 2: 노트 테이킹** (중심 내용, 키워드 위주 기록)
     * **Step 3: 다시 듣기** (놓친 부분 체크)
     """,
-    "p1_step2": "**Step 2: Note Taking**\n들리는 내용을 중심으로 노트테이킹(코넬식 등)을 합니다. 안 들리는 부분에 집착하지 말고, 최대한 중심 내용과 메시지를 파악하는 것에 집중합니다. 발표 구조(서론, 본론, 결론)와 흐름을 알려주는 시그널(접속사, 강조 표현 등)에 집중하여 적습니다.",
-    "p1_step3": "**Step 3: Missed Parts**\n노트테이킹 내용과 비교하며, 다 들리지 않았던 표현들을 체크합니다. 결국, 자막 없이 들었을 때 전체 메시지와 핵심 키워드를 파악하는 연습을 반복하는 것이 핵심입니다.",
+    "p1_step2": """**Step 2: 뼈대 잡기 (Note Taking)**\n\n**자막 OFF**\n\n전체적인 흐름과 큰 구조(서론, 본론, 결론)를 파악하는 단계입니다. 즉, **'전체 숲'**을 그리는 과정입니다.\n\n들리는 대로 중심 내용을 적어 내려가되, 안 들리는 부분은 집착하지 말고 과감히 넘어갑니다.\n\n(마음가짐: "무슨 이야기를 하는 거지?")""",
+    "p1_step3": """**Step 3: 살 붙이기 (Fill in the blanks)**\n\n**자막 OFF (절대 켜지 않음)**\n\nStep 2에서 작성한 노트를 보며 **'놓친 정보(나무)'**를 채워 넣습니다. 딕테이션처럼 모든 단어를 적는 것이 아니라, 핵심 의미를 완성하는 것이 목표입니다.\n\n**[비교 예시]**\n*"What I really want to emphasize here is that consistency is the key to success."*\n\n❌ **딕테이션:** What, I, really, want... (모든 단어/전치사 집착)\n✅ **Step 3:** Consistency -> Success (핵심 정보만!)\n\nStep 3는 '안 들리는 소리'가 아니라 **'놓친 정보'**를 채우는 과정입니다. "아까 놓친 중요한 단어가 뭐였지?"에만 집중하세요.""",
     
     "phase2": """
     **✅ 2부: 원인 분석 및 학습 (Analysis & Learning)**
@@ -170,7 +171,121 @@ def fetch_video_info(url):
             print(f"Transcript error: {e}")
             transcript_text = ""
 
-    return title, transcript_text
+    return title, transcript_text, video_id
+
+def render_custom_player(video_id):
+    """
+    Render a custom YouTube player with -5s, +5s, and Loop controls.
+    This uses the YouTube IFrame Player API within a Streamlit component.
+    """
+    player_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <body>
+        <!-- 1. The <iframe> (and video player) will replace this <div> tag. -->
+        <div id="player"></div>
+
+        <div style="display: flex; gap: 10px; margin-top: 10px; justify-content: center; font-family: sans-serif;">
+            <button onclick="seek(-5)" style="padding: 8px 16px; cursor: pointer; border-radius: 5px; border: 1px solid #ccc; background: #f0f0f0;">⏪ -5s</button>
+            <button onclick="togglePlay()" style="padding: 8px 16px; cursor: pointer; border-radius: 5px; border: 1px solid #ccc; background: #f0f0f0;">⏯ Play/Pause</button>
+            <button onclick="seek(5)" style="padding: 8px 16px; cursor: pointer; border-radius: 5px; border: 1px solid #ccc; background: #f0f0f0;">⏩ +5s</button>
+            <button onclick="toggleLoop()" id="loopBtn" style="padding: 8px 16px; cursor: pointer; border-radius: 5px; border: 1px solid #ccc; background: #f0f0f0;">🔁 Loop Last 5s</button>
+        </div>
+
+        <script>
+            // 2. This code loads the IFrame Player API code asynchronously.
+            var tag = document.createElement('script');
+            tag.src = "https://www.youtube.com/iframe_api";
+            var firstScriptTag = document.getElementsByTagName('script')[0];
+            firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+
+            var player;
+            var isLooping = false;
+            var loopStart = 0;
+            var loopInterval;
+
+            function onYouTubeIframeAPIReady() {{
+                player = new YT.Player('player', {{
+                    height: '360',
+                    width: '100%',
+                    videoId: '{video_id}',
+                    playerVars: {{
+                        'playsinline': 1,
+                        'modestbranding': 1,
+                        'rel': 0
+                    }},
+                    events: {{
+                        'onStateChange': onPlayerStateChange
+                    }}
+                }});
+            }}
+
+            function onPlayerStateChange(event) {{
+                // Handle state changes if needed
+            }}
+
+            function seek(seconds) {{
+                if (player && player.getCurrentTime) {{
+                    var currentTime = player.getCurrentTime();
+                    player.seekTo(currentTime + seconds, true);
+                    player.playVideo();
+                }}
+            }}
+
+            function togglePlay() {{
+                if (player && player.getPlayerState) {{
+                    var state = player.getPlayerState();
+                    if (state == 1) {{ // Playing
+                        player.pauseVideo();
+                    }} else {{
+                        player.playVideo();
+                    }}
+                }}
+            }}
+            
+            function toggleLoop() {{
+                if (!player || !player.getCurrentTime) return;
+
+                isLooping = !isLooping;
+                var btn = document.getElementById("loopBtn");
+                
+                if (isLooping) {{
+                    btn.innerHTML = "🔁 Stop Loop";
+                    btn.style.background = "#ffcccc";
+                    btn.style.borderColor = "#ff0000";
+                    
+                    // Set loop range: Current Time - 5s to Current Time
+                    var curr = player.getCurrentTime();
+                    loopStart = Math.max(0, curr - 5);
+                    
+                    player.seekTo(loopStart);
+                    player.playVideo();
+                    
+                    // Start checking time
+                    if (loopInterval) clearInterval(loopInterval);
+                    loopInterval = setInterval(checkLoop, 200); // Check frequently
+                }} else {{
+                    btn.innerHTML = "🔁 Loop Last 5s";
+                    btn.style.background = "#f0f0f0";
+                    btn.style.borderColor = "#ccc";
+                    if (loopInterval) clearInterval(loopInterval);
+                }}
+            }}
+            
+            function checkLoop() {{
+                if (!isLooping) return;
+                
+                var curr = player.getCurrentTime();
+                // Loop is fixed 5 seconds from start
+                if (curr >= loopStart + 5) {{
+                    player.seekTo(loopStart);
+                }}
+            }}
+        </script>
+    </body>
+    </html>
+    """
+    components.html(player_html, height=450)
 
 # --- Router Logic ---
 if 'page' not in st.session_state:
@@ -309,7 +424,7 @@ elif st.session_state.page == "learning":
         
         # Show Title in Sidebar
         if sess.get("video_title"):
-             st.info(f"📺 {sess['video_title']}")
+            st.info(f"📺 {sess['video_title']}")
         
         st.divider()
         st.subheader("🤖 AI Tutor Settings")
@@ -329,7 +444,7 @@ elif st.session_state.page == "learning":
         
         st.divider()
         if st.button("🗑️ Delete Session", type="secondary", use_container_width=True):
-             delete_session_callback(sess['id'])
+            delete_session_callback(sess['id'])
     
     # Header
     col1, col2 = st.columns([3, 1])
@@ -344,9 +459,10 @@ elif st.session_state.page == "learning":
             
             # Auto-fetch title when URL changes
             with st.spinner("Fetching video info & transcript..."):
-                title, transcript = fetch_video_info(video_url)
+                title, transcript, v_id = fetch_video_info(video_url)
                 sess["video_title"] = title
                 sess["video_transcript"] = transcript
+                sess["video_id"] = v_id
                 
             st.session_state.is_dirty = True
             st.rerun()
@@ -359,7 +475,11 @@ elif st.session_state.page == "learning":
 
     # Video Area
     if video_url:
-        st.video(video_url)
+        # Try to use custom player if video_id is available
+        if sess.get("video_id"):
+            render_custom_player(sess["video_id"])
+        else:
+            st.video(video_url)
         
         # Display Title above video
         if sess.get("video_title"):
@@ -389,38 +509,71 @@ elif st.session_state.page == "learning":
         * **Step 1: Just Listen** (04:40) - Relax and grasp the context (No input needed).
         """)
         
-        c1, c2 = st.columns(2)
-        with c1:
-            val = st.text_area(
-                "Step 2: Note Taking (Main Ideas)", 
-                value=sess["phase1"].get("notes", ""), 
+        # Step 2 Input
+        val = st.text_area(
+            "Step 2: Note Taking (Main Ideas)", 
+            value=sess["phase1"].get("notes", ""), 
             height=300,
-                help=TIPS["p1_step2"],
-                key="p1_step2_notes"  # Added unique key
+            help=TIPS["p1_step2"],
+            key="p1_step2_notes"  # Added unique key
         )
-            if val != sess["phase1"].get("notes", ""):
-                sess["phase1"]["notes"] = val
+        if val != sess["phase1"].get("notes", ""):
+            sess["phase1"]["notes"] = val
+        st.session_state.is_dirty = True
+
+        st.write("") # Spacing
+
+        # Step 3 Input
+        # Button to copy Step 2 notes to Step 3
+        if st.button("📥 Copy from Step 2", help="Copy Step 2 notes here to fill in the blanks."):
+            new_val = sess["phase1"].get("notes", "")
+            sess["phase1"]["missed_parts"] = new_val
+            st.session_state["p1_step3_missed"] = new_val
             st.session_state.is_dirty = True
-        with c2:
-            val = st.text_area(
-                "Step 3: Listen Again (Missed Parts)", 
-                value=sess["phase1"].get("missed_parts", ""), 
+            st.rerun()
+
+        val = st.text_area(
+            "Step 3: Listen Again (Missed Parts)", 
+            value=sess["phase1"].get("missed_parts", ""), 
             height=300,
-                help=TIPS["p1_step3"],
-                key="p1_step3_missed"  # Added unique key
+            help=TIPS["p1_step3"],
+            key="p1_step3_missed"  # Added unique key
         )
-            if val != sess["phase1"].get("missed_parts", ""):
-                sess["phase1"]["missed_parts"] = val
-            st.session_state.is_dirty = True
+        if val != sess["phase1"].get("missed_parts", ""):
+            sess["phase1"]["missed_parts"] = val
+        st.session_state.is_dirty = True
 
     # --- Tab 2: Analysis & Learning (Steps 4-6) ---
     with t2:
         st.subheader("Phase 2: Analysis & Learning (Steps 4-6)", help=TIPS["phase2"])
         
         st.markdown("""
-        * **Step 4: Direct Translation** (11:46) - Turn on subtitles and compare with your notes.
         * **Step 6: Verify** (20:28) - Turn off subtitles and listen again.
         """)
+
+        st.divider()
+        
+        # --- Step 4 Implementation ---
+        st.markdown("### Step 4: Direct Translation (Compare with Notes)")
+        st.caption("Turn on subtitles and compare them with your notes from Phase 1.")
+        
+        c_s4_1, c_s4_2 = st.columns(2)
+        with c_s4_1:
+            st.text_area(
+                "Your Step 2 Notes (Read Only):",
+                value=sess["phase1"].get("notes", ""),
+                height=200,
+                disabled=True,
+                key="step4_review_notes"
+            )
+        with c_s4_2:
+            st.text_area(
+                "Your Step 3 Missed Parts (Read Only):",
+                value=sess["phase1"].get("missed_parts", ""),
+                height=200,
+                disabled=True,
+                key="step4_review_missed"
+            )
         
         st.divider()
         st.markdown("### Step 5: Error Analysis (Why did I miss it?)")
@@ -514,16 +667,16 @@ elif st.session_state.page == "learning":
         with bank_tab1:
             st.caption("Collect unknown words here:")
             current_vocab = p2.get("vocab_list", [])
-        if not current_vocab:
-            df_vocab = pd.DataFrame(columns=["Word", "Meaning", "Example"])
-        else:
-            df_vocab = pd.DataFrame(current_vocab)
+            if not current_vocab:
+                df_vocab = pd.DataFrame(columns=["Word", "Meaning", "Example"])
+            else:
+                df_vocab = pd.DataFrame(current_vocab)
 
             edited_df_v = st.data_editor(df_vocab, num_rows="dynamic", use_container_width=True, key="vocab_editor")
             new_vocab = edited_df_v.to_dict('records')
             if new_vocab != current_vocab:
                 sess["phase2"]["vocab_list"] = new_vocab
-            st.session_state.is_dirty = True
+                st.session_state.is_dirty = True
 
         with bank_tab2:
             st.caption("Collect sentence patterns & grammar points here:")
@@ -560,7 +713,7 @@ elif st.session_state.page == "learning":
                     sess["phase3"]["audio_file"] = fname
                     st.success("Saved!")
                     st.session_state.is_dirty = True
-            
+
             saved = sess["phase3"].get("audio_file")
             if saved:
                 st.info(f"Saved: {saved}")
@@ -573,9 +726,9 @@ elif st.session_state.page == "learning":
             val = st.text_area(
                 "Summary (Your Own Words):", 
                 value=sess["phase3"].get("summary", ""), 
-                height=300,
+            height=300,
                 key="p3_summary_output" # Added unique key
-            )
+        )
             if val != sess["phase3"].get("summary", ""):
                 sess["phase3"]["summary"] = val
             st.session_state.is_dirty = True
