@@ -181,8 +181,7 @@ def render_custom_player(video_id):
     player_html = f"""
     <!DOCTYPE html>
     <html>
-    <body>
-        <!-- 1. The <iframe> (and video player) will replace this <div> tag. -->
+    <body style="margin:0;padding:0;">
         <div id="player"></div>
 
         <div style="display: flex; gap: 10px; margin-top: 10px; justify-content: center; font-family: sans-serif;">
@@ -206,7 +205,7 @@ def render_custom_player(video_id):
 
             function onYouTubeIframeAPIReady() {{
                 player = new YT.Player('player', {{
-                    height: '360',
+                    height: '200',
                     width: '100%',
                     videoId: '{video_id}',
                     playerVars: {{
@@ -285,7 +284,7 @@ def render_custom_player(video_id):
     </body>
     </html>
     """
-    components.html(player_html, height=450)
+    components.html(player_html, height=280)
 
 # --- Router Logic ---
 if 'page' not in st.session_state:
@@ -473,29 +472,58 @@ elif st.session_state.page == "learning":
         if st.button("💾 Save Progress", type="primary", use_container_width=True):
             save_current_session()
 
-    # Video Area
-    if video_url:
-        # Try to use custom player if video_id is available
-        if sess.get("video_id"):
-            render_custom_player(sess["video_id"])
-        else:
-            st.video(video_url)
-        
-        # Display Title above video
-        if sess.get("video_title"):
-            st.caption(f"Playing: **{sess['video_title']}**")
+    # CSS for fixed video area (top 1/3) and scrollable content (bottom 2/3)
+    st.markdown("""
+        <style>
+            .fixed-video-area {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 33.33vh;
+                z-index: 1000;
+                background-color: white;
+                padding: 1rem;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                overflow-y: auto;
+            }
+            .content-area {
+                margin-top: 33.33vh;
+                padding: 1rem;
+            }
+        </style>
+    """, unsafe_allow_html=True)
 
-        # Ad-free link
-        st.markdown(f"""
+    # Video Area - Fixed at top 1/3
+    video_container = st.container()
+    with video_container:
+        st.markdown('<div class="fixed-video-area">', unsafe_allow_html=True)
+        if video_url:
+            # Try to use custom player if video_id is available
+            if sess.get("video_id"):
+                render_custom_player(sess["video_id"])
+            else:
+                st.video(video_url)
+            
+            # Display Title above video
+            if sess.get("video_title"):
+                st.caption(f"Playing: **{sess['video_title']}**")
+
+            # Ad-free link
+            st.markdown(f"""
         <a href="{video_url}" target="_blank" style="text-decoration:none;">
             <button style="background-color: #FF0000; color: white; border: none; border-radius: 5px; padding: 8px 16px; cursor: pointer; font-weight: bold; display: flex; align-items: center; gap: 8px;">
                 📺 Watch on YouTube (New Tab) - Use for Premium/No Ads
             </button>
         </a>
-        """, unsafe_allow_html=True)
-    else:
-        st.info("👆 Paste a video URL above to start.")
+            """, unsafe_allow_html=True)
+        else:
+            st.info("👆 Paste a video URL above to start.")
+        st.markdown('</div>', unsafe_allow_html=True)
 
+    # Content Area - Bottom 2/3
+    st.markdown('<div class="content-area">', unsafe_allow_html=True)
+    
     st.divider()
 
     # Tabs
@@ -731,4 +759,7 @@ elif st.session_state.page == "learning":
         )
             if val != sess["phase3"].get("summary", ""):
                 sess["phase3"]["summary"] = val
-            st.session_state.is_dirty = True
+                st.session_state.is_dirty = True
+    
+    # Close content area div
+    st.markdown('</div>', unsafe_allow_html=True)
