@@ -149,7 +149,7 @@ def fetch_video_info(url):
         try:
             # Prefer manually created English subtitles, fallback to auto-generated
             transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-            
+
             # Try to find English (manual or auto)
             try:
                 transcript = transcript_list.find_transcript(['en', 'en-US', 'en-GB'])
@@ -163,7 +163,7 @@ def fetch_video_info(url):
                      transcript = transcript_list.find_transcript(['en']).translate('en')
 
             final_transcript = transcript.fetch()
-            
+
             # Combine into single string
             transcript_text = " ".join([item['text'] for item in final_transcript])
             
@@ -175,20 +175,22 @@ def fetch_video_info(url):
 
 def render_custom_player(video_id):
     """
-    Render a custom YouTube player with -5s, +5s, and Loop controls.
-    This uses the YouTube IFrame Player API within a Streamlit component.
+    Render a custom YouTube player with transport controls.
+    The player is width-constrained so it covers roughly half the screen.
     """
     player_html = f"""
     <!DOCTYPE html>
     <html>
-    <body style="margin:0;padding:0;">
-        <div id="player"></div>
+    <body style="margin:0;padding:0;text-align:center;">
+        <div style="max-width:600px;margin:0 auto;">
+            <div id="player"></div>
+        </div>
 
-        <div style="display: flex; gap: 10px; margin-top: 10px; justify-content: center; font-family: sans-serif;">
-            <button onclick="seek(-5)" style="padding: 8px 16px; cursor: pointer; border-radius: 5px; border: 1px solid #ccc; background: #f0f0f0;">⏪ -5s</button>
-            <button onclick="togglePlay()" style="padding: 8px 16px; cursor: pointer; border-radius: 5px; border: 1px solid #ccc; background: #f0f0f0;">⏯ Play/Pause</button>
-            <button onclick="seek(5)" style="padding: 8px 16px; cursor: pointer; border-radius: 5px; border: 1px solid #ccc; background: #f0f0f0;">⏩ +5s</button>
-            <button onclick="toggleLoop()" id="loopBtn" style="padding: 8px 16px; cursor: pointer; border-radius: 5px; border: 1px solid #ccc; background: #f0f0f0;">🔁 Loop Last 5s</button>
+        <div style="display:flex;gap:10px;margin-top:10px;justify-content:center;font-family:sans-serif;">
+            <button onclick="seek(-5)" style="padding:8px 16px;cursor:pointer;border-radius:5px;border:1px solid #ccc;background:#f0f0f0;">⏪ -5s</button>
+            <button onclick="togglePlay()" style="padding:8px 16px;cursor:pointer;border-radius:5px;border:1px solid #ccc;background:#f0f0f0;">⏯ Play/Pause</button>
+            <button onclick="seek(5)" style="padding:8px 16px;cursor:pointer;border-radius:5px;border:1px solid #ccc;background:#f0f0f0;">⏩ +5s</button>
+            <button onclick="toggleLoop()" id="loopBtn" style="padding:8px 16px;cursor:pointer;border-radius:5px;border:1px solid #ccc;background:#f0f0f0;">🔁 Loop Last 5s</button>
         </div>
 
         <script>
@@ -205,7 +207,7 @@ def render_custom_player(video_id):
 
             function onYouTubeIframeAPIReady() {{
                 player = new YT.Player('player', {{
-                    height: '200',
+                    height: '337',
                     width: '100%',
                     videoId: '{video_id}',
                     playerVars: {{
@@ -284,7 +286,7 @@ def render_custom_player(video_id):
     </body>
     </html>
     """
-    components.html(player_html, height=280)
+    components.html(player_html, height=420)
 
 # --- Router Logic ---
 if 'page' not in st.session_state:
@@ -472,58 +474,29 @@ elif st.session_state.page == "learning":
         if st.button("💾 Save Progress", type="primary", use_container_width=True):
             save_current_session()
 
-    # CSS for fixed video area (top 1/3) and scrollable content (bottom 2/3)
-    st.markdown("""
-        <style>
-            .fixed-video-area {
-                position: fixed;
-                top: 0;
-                left: 0;
-                right: 0;
-                height: 33.33vh;
-                z-index: 1000;
-                background-color: white;
-                padding: 1rem;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-                overflow-y: auto;
-            }
-            .content-area {
-                margin-top: 33.33vh;
-                padding: 1rem;
-            }
-        </style>
-    """, unsafe_allow_html=True)
-
-    # Video Area - Fixed at top 1/3
-    video_container = st.container()
-    with video_container:
-        st.markdown('<div class="fixed-video-area">', unsafe_allow_html=True)
-        if video_url:
-            # Try to use custom player if video_id is available
-            if sess.get("video_id"):
-                render_custom_player(sess["video_id"])
-            else:
-                st.video(video_url)
-            
-            # Display Title above video
-            if sess.get("video_title"):
-                st.caption(f"Playing: **{sess['video_title']}**")
-
-            # Ad-free link
-            st.markdown(f"""
-        <a href="{video_url}" target="_blank" style="text-decoration:none;">
-            <button style="background-color: #FF0000; color: white; border: none; border-radius: 5px; padding: 8px 16px; cursor: pointer; font-weight: bold; display: flex; align-items: center; gap: 8px;">
-                📺 Watch on YouTube (New Tab) - Use for Premium/No Ads
-            </button>
-        </a>
-            """, unsafe_allow_html=True)
+    # Video Area
+    if video_url:
+        if sess.get("video_id"):
+            render_custom_player(sess["video_id"])
         else:
-            st.info("👆 Paste a video URL above to start.")
-        st.markdown('</div>', unsafe_allow_html=True)
+            st.video(video_url)
+        
+        if sess.get("video_title"):
+            st.caption(f"Playing: **{sess['video_title']}**")
 
-    # Content Area - Bottom 2/3
-    st.markdown('<div class="content-area">', unsafe_allow_html=True)
-    
+        st.markdown(
+            f"""
+            <a href="{video_url}" target="_blank" style="text-decoration:none;">
+                <button style="background-color: #FF0000; color: white; border: none; border-radius: 5px; padding: 8px 16px; cursor: pointer; font-weight: bold; display: flex; align-items: center; gap: 8px;">
+                    📺 Watch on YouTube (New Tab) - Use for Premium/No Ads
+                </button>
+            </a>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.info("👆 Paste a video URL above to start.")
+
     st.divider()
 
     # Tabs
@@ -537,39 +510,42 @@ elif st.session_state.page == "learning":
         * **Step 1: Just Listen** (04:40) - Relax and grasp the context (No input needed).
         """)
         
-        # Step 2 Input
-        val = st.text_area(
-            "Step 2: Note Taking (Main Ideas)", 
-            value=sess["phase1"].get("notes", ""), 
-            height=300,
-            help=TIPS["p1_step2"],
-            key="p1_step2_notes"  # Added unique key
-        )
-        if val != sess["phase1"].get("notes", ""):
-            sess["phase1"]["notes"] = val
-        st.session_state.is_dirty = True
-
-        st.write("") # Spacing
-
-        # Step 3 Input
-        # Button to copy Step 2 notes to Step 3
-        if st.button("📥 Copy from Step 2", help="Copy Step 2 notes here to fill in the blanks."):
-            new_val = sess["phase1"].get("notes", "")
-            sess["phase1"]["missed_parts"] = new_val
-            st.session_state["p1_step3_missed"] = new_val
-            st.session_state.is_dirty = True
-            st.rerun()
-
-        val = st.text_area(
-            "Step 3: Listen Again (Missed Parts)", 
-            value=sess["phase1"].get("missed_parts", ""), 
-            height=300,
-            help=TIPS["p1_step3"],
-            key="p1_step3_missed"  # Added unique key
-        )
-        if val != sess["phase1"].get("missed_parts", ""):
-            sess["phase1"]["missed_parts"] = val
-        st.session_state.is_dirty = True
+        # Step 2 and Step 3 in 1 row, 2 columns
+        col_s2, col_s3 = st.columns(2)
+        
+        with col_s2:
+            # Step 2 Input
+            val = st.text_area(
+                "Step 2: Note Taking (Main Ideas)", 
+                value=sess["phase1"].get("notes", ""), 
+                height=400,
+                help=TIPS["p1_step2"],
+                key="p1_step2_notes"
+            )
+            if val != sess["phase1"].get("notes", ""):
+                sess["phase1"]["notes"] = val
+                st.session_state.is_dirty = True
+            
+            # Button to copy Step 2 notes to Step 3
+            if st.button("📥 Copy from Step 2", help="Copy Step 2 notes here to fill in the blanks."):
+                new_val = sess["phase1"].get("notes", "")
+                sess["phase1"]["missed_parts"] = new_val
+                st.session_state["p1_step3_missed"] = new_val
+                st.session_state.is_dirty = True
+                st.rerun()
+        
+        with col_s3:
+            # Step 3 Input
+            val = st.text_area(
+                "Step 3: Listen Again (Missed Parts)", 
+                value=sess["phase1"].get("missed_parts", ""), 
+                height=400,
+                help=TIPS["p1_step3"],
+                key="p1_step3_missed"
+            )
+            if val != sess["phase1"].get("missed_parts", ""):
+                sess["phase1"]["missed_parts"] = val
+                st.session_state.is_dirty = True
 
     # --- Tab 2: Analysis & Learning (Steps 4-6) ---
     with t2:
@@ -759,7 +735,4 @@ elif st.session_state.page == "learning":
         )
             if val != sess["phase3"].get("summary", ""):
                 sess["phase3"]["summary"] = val
-                st.session_state.is_dirty = True
-    
-    # Close content area div
-    st.markdown('</div>', unsafe_allow_html=True)
+            st.session_state.is_dirty = True
