@@ -1,0 +1,54 @@
+# Project Intelligence & Behavior Rules — My Kaizen
+
+## 🛠 Detected Tech Stack
+- **Language:** Python 3.9+
+- **Frameworks:** Streamlit (UI/Dashboard), FastAPI (REST API)
+- **Package Manager:** pip (requirements.txt)
+- **Test Runner:** pytest
+- **Linter/Formatter:** flake8, black
+- **Data Processing:** pandas, numpy, SQLite3 (built-in)
+- **Web Scraping:** Selenium + webdriver-manager, BeautifulSoup4, lxml
+- **AI/LLM Integration:** google-generativeai, openai, anthropic, sentence-transformers
+- **PDF Parsing:** pdfplumber, tabula-py, PyPDF2, camelot-py
+- **Media Processing:** yt-dlp, youtube-transcript-api, imageio-ffmpeg
+- **Visualization:** plotly, matplotlib, seaborn
+- **Scheduling:** macOS launchd (.plist)
+
+## 🧪 Strict TDD (Test-Driven Development) Workflow
+- You MUST follow the Red-Green-Refactor cycle for ALL code changes or new features.
+- Steps:
+  1. Write a failing test case in the `tests/` directory (mirror source structure).
+  2. Run `pytest tests/ -v` to confirm the test fails.
+  3. Write the minimum amount of code required to pass the test.
+  4. Refactor the code for quality while ensuring all tests remain green.
+- **Test Naming:** `test_<module>_<scenario>_<expected>()`
+- **Shared Fixtures:** Define in `tests/conftest.py`
+- **Legacy Debt:** If you are modifying existing code that lacks tests, you MUST write the test cases first before making any logic changes.
+- **Regression Gate:** After any change, run the full test suite before reporting completion.
+
+## 💰 Token Efficiency & Context Optimization
+- **Selective Reading:** Never read entire files if only a specific function or class is relevant. Use `view_file_outline` first, then `view_code_item` for targeted inspection.
+- **Plan-First Requirement:** For any task involving multiple files, you MUST use the 'Implementation Plan' artifact to get user approval before editing any files.
+- **Noise Reduction:** NEVER read or traverse these directories:
+  - `kaizen-venv/` (virtual environment / dependencies)
+  - `data/`, `logs/` (runtime data — only if explicitly requested)
+  - `__pycache__/`, `.git/`
+  - Lock files, build artifacts
+- **Concise Communication:** Keep chat responses brief. Use code comments for detailed logic explanations. Summarize execution results, do not narrate every step.
+
+## 📋 Work Protocol
+- **New Feature:** Plan → Approve → RED test → GREEN code → REFACTOR → Full pytest → Report
+- **Bug Fix:** Reproduce with failing test → Fix → Regression suite
+- **Refactoring:** Ensure characterization tests exist → Refactor → All tests green
+
+## 🔒 Hard Constraints
+- NEVER modify production code without a corresponding test.
+- NEVER expose API keys, `.env` contents, or secrets in responses.
+- NEVER delete files without explicit user approval.
+- ALWAYS reference `Gemini.md` in the project root for the full operational manifesto.
+
+## 🛠 Quick Reference Commands
+- **Activate venv:** `source kaizen-venv/bin/activate`
+- **Run tests:** `pytest tests/ -v`
+- **Format code:** `black .`
+- **Lint check:** `flake8 .`

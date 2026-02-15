@@ -223,7 +223,9 @@ def render_custom_player(video_id):
             <button onclick="seek(-5)" style="padding:8px 16px;cursor:pointer;border-radius:5px;border:1px solid #ccc;background:#f0f0f0;">⏪ -5s</button>
             <button onclick="togglePlay()" style="padding:8px 16px;cursor:pointer;border-radius:5px;border:1px solid #ccc;background:#f0f0f0;">⏯ Play/Pause</button>
             <button onclick="seek(5)" style="padding:8px 16px;cursor:pointer;border-radius:5px;border:1px solid #ccc;background:#f0f0f0;">⏩ +5s</button>
-            <button onclick="toggleLoop()" id="loopBtn" style="padding:8px 16px;cursor:pointer;border-radius:5px;border:1px solid #ccc;background:#f0f0f0;">🔁 Loop Last 5s</button>
+            <button onclick="toggleLoop()" id="loopBtn" style="padding:8px 16px;cursor:pointer;border-radius:5px;border:1px solid #ccc;background:#f0f0f0;">🔁 Loop</button>
+            <input type="number" id="loopDur" value="5" min="1" max="30" step="0.5" style="width:55px;padding:8px 4px;border-radius:5px;border:1px solid #ccc;text-align:center;font-size:14px;"/>
+            <span style="font-family:sans-serif;font-size:14px;">s</span>
         </div>
 
         <script>
@@ -284,13 +286,14 @@ def render_custom_player(video_id):
                 var btn = document.getElementById("loopBtn");
                 
                 if (isLooping) {{
+                    var loopDuration = parseFloat(document.getElementById("loopDur").value) || 5;
                     btn.innerHTML = "🔁 Stop Loop";
                     btn.style.background = "#ffcccc";
                     btn.style.borderColor = "#ff0000";
                     
-                    // Set loop range: Current Time - 5s to Current Time
+                    // Set loop range: Current Time - Ns to Current Time
                     var curr = player.getCurrentTime();
-                    loopStart = Math.max(0, curr - 5);
+                    loopStart = Math.max(0, curr - loopDuration);
                     
                     player.seekTo(loopStart);
                     player.playVideo();
@@ -299,7 +302,7 @@ def render_custom_player(video_id):
                     if (loopInterval) clearInterval(loopInterval);
                     loopInterval = setInterval(checkLoop, 200); // Check frequently
                 }} else {{
-                    btn.innerHTML = "🔁 Loop Last 5s";
+                    btn.innerHTML = "🔁 Loop";
                     btn.style.background = "#f0f0f0";
                     btn.style.borderColor = "#ccc";
                     if (loopInterval) clearInterval(loopInterval);
@@ -310,8 +313,8 @@ def render_custom_player(video_id):
                 if (!isLooping) return;
                 
                 var curr = player.getCurrentTime();
-                // Loop is fixed 5 seconds from start
-                if (curr >= loopStart + 5) {{
+                var loopDuration = parseFloat(document.getElementById("loopDur").value) || 5;
+                if (curr >= loopStart + loopDuration) {{
                     player.seekTo(loopStart);
                 }}
             }}
