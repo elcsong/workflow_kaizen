@@ -14,6 +14,41 @@ st.set_page_config(
     layout="wide"
 )
 
+# Custom CSS for layout
+st.markdown("""
+<style>
+    [data-testid="stDataEditor"] div[data-testid="cell-content"] {
+        white-space: pre-wrap !important;
+        word-wrap: break-word !important;
+    }
+    
+    /* Left column (video) - fixed height to browser */
+    [data-testid="stHorizontalBlock"] > div:first-child {
+        position: sticky;
+        top: 0;
+        align-self: flex-start;
+        max-height: calc(100vh - 80px);
+        overflow-y: auto;
+    }
+    
+    /* Right column (tabs) - scrollable with fixed height */
+    [data-testid="stHorizontalBlock"] > div:last-child {
+        max-height: calc(100vh - 80px);
+        overflow-y: auto;
+        padding-right: 0.5rem;
+    }
+    
+    /* Custom scrollbar for right column */
+    [data-testid="stHorizontalBlock"] > div:last-child::-webkit-scrollbar {
+        width: 6px;
+    }
+    [data-testid="stHorizontalBlock"] > div:last-child::-webkit-scrollbar-thumb {
+        background: #555;
+        border-radius: 3px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # Initialize Manager
 if 'manager' not in st.session_state:
     st.session_state.manager = SessionManager()
@@ -101,7 +136,7 @@ def save_current_session():
 
 def go_to_dashboard():
     st.session_state.page = "dashboard"
-    st.rerun()
+    # Note: st.rerun() not needed when used as on_click callback
 
 def delete_session_callback(session_id):
     """Handles session deletion and UI update."""
@@ -116,10 +151,25 @@ def delete_session_callback(session_id):
     else:
         st.error("Failed to delete session.")
 
+def extract_video_id_from_url(url):
+    """Extract YouTube video ID from various URL formats."""
+    import re
+    if not url:
+        return None
+    patterns = [
+        r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/)([a-zA-Z0-9_-]{11})',
+        r'youtube\.com/watch\?.*v=([a-zA-Z0-9_-]{11})',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    return None
+
 def fetch_video_info(url):
     """Extract video title and transcript (if available)."""
     if not url:
-        return "", ""
+        return "", "", None
     
     title = url
     transcript_text = ""
@@ -144,29 +194,12 @@ def fetch_video_info(url):
         print(f"yt-dlp error: {e}")
         video_id = None
 
-    # 2. Get Transcript via youtube_transcript_api
+    # 2. Get Transcript via youtube_transcript_api (new API)
     if video_id:
         try:
-            # Prefer manually created English subtitles, fallback to auto-generated
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-
-            # Try to find English (manual or auto)
-            try:
-                transcript = transcript_list.find_transcript(['en', 'en-US', 'en-GB'])
-            except:
-                # Fallback to generated English if specific codes fail, or just first available
-                try:
-                    transcript = transcript_list.find_generated_transcript(['en'])
-                except:
-                     # Last resort: just take the first one available (could be non-English but better than nothing?)
-                     # Or maybe stop here. Let's try to get translation to English if source is different.
-                     transcript = transcript_list.find_transcript(['en']).translate('en')
-
-            final_transcript = transcript.fetch()
-
-            # Combine into single string
-            transcript_text = " ".join([item['text'] for item in final_transcript])
-            
+            api = YouTubeTranscriptApi()
+            transcript_data = api.fetch(video_id, languages=['en', 'en-US', 'en-GB'])
+            transcript_text = " ".join([item.text for item in transcript_data])
         except Exception as e:
             print(f"Transcript error: {e}")
             transcript_text = ""
@@ -447,13 +480,15 @@ elif st.session_state.page == "learning":
         if st.button("🗑️ Delete Session", type="secondary", use_container_width=True):
             delete_session_callback(sess['id'])
     
-    # Header
-    col1, col2 = st.columns([3, 1])
-    with col1:
+    # ===== Split Layout: Left = Video, Right = Tabs =====
+    left_col, right_col = st.columns([1, 2])  # Video 1/3, Tabs 2/3
+    
+    # --- LEFT COLUMN: Video Area ---
+    with left_col:
         video_url = st.text_input(
             "Video URL", 
             value=sess.get("video_url", ""),
-            placeholder="Paste YouTube or TED link here..."
+            placeholder="Paste YouTube link here..."
         )
         if video_url != sess.get("video_url", ""):
             sess["video_url"] = video_url
@@ -467,47 +502,45 @@ elif st.session_state.page == "learning":
                 
             st.session_state.is_dirty = True
             st.rerun()
-    
-    with col2:
-        st.write("")
-        st.write("") 
+        
         if st.button("💾 Save Progress", type="primary", use_container_width=True):
             save_current_session()
-
-    # Video Area
-    if video_url:
-        if sess.get("video_id"):
-            render_custom_player(sess["video_id"])
-        else:
-            st.video(video_url)
         
-        if sess.get("video_title"):
-            st.caption(f"Playing: **{sess['video_title']}**")
+        st.divider()
+        
+        # Video Player
+        if video_url:
+            if sess.get("video_id"):
+                render_custom_player(sess["video_id"])
+            else:
+                st.video(video_url)
+            
+            if sess.get("video_title"):
+                st.caption(f"**{sess['video_title']}**")
 
-        st.markdown(
-            f"""
-            <a href="{video_url}" target="_blank" style="text-decoration:none;">
-                <button style="background-color: #FF0000; color: white; border: none; border-radius: 5px; padding: 8px 16px; cursor: pointer; font-weight: bold; display: flex; align-items: center; gap: 8px;">
-                    📺 Watch on YouTube (New Tab) - Use for Premium/No Ads
-                </button>
-            </a>
-            """,
-            unsafe_allow_html=True,
-        )
-    else:
-        st.info("👆 Paste a video URL above to start.")
-
-    st.divider()
-
-    # Tabs
-    t1, t2, t3 = st.tabs(["1️⃣ Proper Listening", "2️⃣ Analysis & Learning", "3️⃣ Shadowing & Utilization"])
+            st.markdown(
+                f"""
+                <a href="{video_url}" target="_blank" style="text-decoration:none;">
+                    <button style="background-color: #FF0000; color: white; border: none; border-radius: 5px; padding: 8px 12px; cursor: pointer; font-weight: bold; font-size: 12px;">
+                        📺 Open in YouTube
+                    </button>
+                </a>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            st.info("👆 Paste a video URL above to start.")
+    
+    # --- RIGHT COLUMN: Tabs Area ---
+    with right_col:
+        t1, t2, t3 = st.tabs(["1️⃣ Listening", "2️⃣ Analysis", "3️⃣ Shadowing"])
 
     # --- Tab 1: Proper Listening (Steps 1-3) ---
     with t1:
         st.subheader("Phase 1: Proper Listening (Steps 1-3)", help=TIPS["phase1"])
         
         st.markdown("""
-        * **Step 1: Just Listen** (04:40) - Relax and grasp the context (No input needed).
+        * **Step 1: Just Listen** - Relax and grasp the context (No input needed).
         """)
         
         # Step 2 and Step 3 in 1 row, 2 columns
@@ -518,7 +551,7 @@ elif st.session_state.page == "learning":
             val = st.text_area(
                 "Step 2: Note Taking (Main Ideas)", 
                 value=sess["phase1"].get("notes", ""), 
-                height=400,
+                height=300,
                 help=TIPS["p1_step2"],
                 key="p1_step2_notes"
             )
@@ -539,7 +572,7 @@ elif st.session_state.page == "learning":
             val = st.text_area(
                 "Step 3: Listen Again (Missed Parts)", 
                 value=sess["phase1"].get("missed_parts", ""), 
-                height=400,
+                height=300,
                 help=TIPS["p1_step3"],
                 key="p1_step3_missed"
             )
@@ -552,7 +585,7 @@ elif st.session_state.page == "learning":
         st.subheader("Phase 2: Analysis & Learning (Steps 4-6)", help=TIPS["phase2"])
         
         st.markdown("""
-        * **Step 6: Verify** (20:28) - Turn off subtitles and listen again.
+        * **Step 6: Verify** - Turn off subtitles and listen again.
         """)
 
         st.divider()
@@ -561,7 +594,7 @@ elif st.session_state.page == "learning":
         st.markdown("### Step 4: Direct Translation (Compare with Notes)")
         st.caption("Turn on subtitles and compare them with your notes from Phase 1.")
         
-        c_s4_1, c_s4_2 = st.columns(2)
+        c_s4_1, c_s4_2, c_s4_3 = st.columns(3)
         with c_s4_1:
             st.text_area(
                 "Your Step 2 Notes (Read Only):",
@@ -577,6 +610,30 @@ elif st.session_state.page == "learning":
                 height=200,
                 disabled=True,
                 key="step4_review_missed"
+            )
+        with c_s4_3:
+            transcript_text = sess.get("video_transcript", "")
+            if not transcript_text:
+                video_id = sess.get("video_id")
+                if not video_id and sess.get("video_url"):
+                    video_id = extract_video_id_from_url(sess.get("video_url", ""))
+                    if video_id:
+                        sess["video_id"] = video_id
+                if video_id:
+                    try:
+                        api = YouTubeTranscriptApi()
+                        transcript_data = api.fetch(video_id, languages=['en', 'en-US', 'en-GB'])
+                        transcript_text = " ".join([item.text for item in transcript_data])
+                        sess["video_transcript"] = transcript_text
+                        st.session_state.is_dirty = True
+                    except Exception as e:
+                        st.caption(f"⚠️ Could not fetch transcript: {str(e)[:50]}")
+            st.text_area(
+                "📜 YouTube Script (Transcript):",
+                value=transcript_text if transcript_text else "(No transcript available)",
+                height=200,
+                disabled=True,
+                key="step4_youtube_script"
             )
         
         st.divider()
@@ -670,31 +727,73 @@ elif st.session_state.page == "learning":
         
         with bank_tab1:
             st.caption("Collect unknown words here:")
+            
+            # Get current vocab data from session
             current_vocab = p2.get("vocab_list", [])
-            if not current_vocab:
-                df_vocab = pd.DataFrame(columns=["Word", "Meaning", "Example"])
+            if current_vocab:
+                initial_vocab_df = pd.DataFrame(current_vocab)
             else:
-                df_vocab = pd.DataFrame(current_vocab)
-
-            edited_df_v = st.data_editor(df_vocab, num_rows="dynamic", use_container_width=True, key="vocab_editor")
-            new_vocab = edited_df_v.to_dict('records')
-            if new_vocab != current_vocab:
+                initial_vocab_df = pd.DataFrame(columns=["Word", "Meaning", "Example"])
+            
+            vocab_editor_key = f"vocab_editor_{sess['id']}"
+            
+            vocab_column_config = {
+                "Word": st.column_config.TextColumn("Word", width="small"),
+                "Meaning": st.column_config.TextColumn("Meaning", width="medium"),
+                "Example": st.column_config.TextColumn("Example", width="large"),
+            }
+            
+            edited_df_v = st.data_editor(
+                initial_vocab_df, 
+                num_rows="dynamic", 
+                use_container_width=True,
+                column_config=vocab_column_config,
+                key=vocab_editor_key
+            )
+            
+            # Save button to persist changes (avoids constant rerender during typing)
+            if st.button("💾 Save Vocabulary", key="save_vocab_btn"):
+                # Filter out empty rows and sync to session
+                new_vocab = [row for row in edited_df_v.to_dict('records') 
+                            if any(str(v).strip() for v in row.values() if v is not None)]
                 sess["phase2"]["vocab_list"] = new_vocab
                 st.session_state.is_dirty = True
+                st.toast("Vocabulary saved!", icon="✅")
 
         with bank_tab2:
             st.caption("Collect sentence patterns & grammar points here:")
+            
+            # Get current grammar data from session
             current_grammar = p2.get("grammar_list", [])
-            if not current_grammar:
-                df_grammar = pd.DataFrame(columns=["Sentence/Pattern", "Grammar Point", "My Note"])
+            if current_grammar:
+                initial_grammar_df = pd.DataFrame(current_grammar)
             else:
-                df_grammar = pd.DataFrame(current_grammar)
-
-            edited_df_g = st.data_editor(df_grammar, num_rows="dynamic", use_container_width=True, key="grammar_editor")
-            new_grammar = edited_df_g.to_dict('records')
-            if new_grammar != current_grammar:
+                initial_grammar_df = pd.DataFrame(columns=["Sentence/Pattern", "Grammar Point", "My Note"])
+            
+            grammar_editor_key = f"grammar_editor_{sess['id']}"
+            
+            grammar_column_config = {
+                "Sentence/Pattern": st.column_config.TextColumn("Sentence/Pattern", width="large"),
+                "Grammar Point": st.column_config.TextColumn("Grammar Point", width="medium"),
+                "My Note": st.column_config.TextColumn("My Note", width="large"),
+            }
+            
+            edited_df_g = st.data_editor(
+                initial_grammar_df, 
+                num_rows="dynamic", 
+                use_container_width=True,
+                column_config=grammar_column_config,
+                key=grammar_editor_key
+            )
+            
+            # Save button to persist changes (avoids constant rerender during typing)
+            if st.button("💾 Save Grammar", key="save_grammar_btn"):
+                # Filter out empty rows and sync to session
+                new_grammar = [row for row in edited_df_g.to_dict('records') 
+                              if any(str(v).strip() for v in row.values() if v is not None)]
                 sess["phase2"]["grammar_list"] = new_grammar
                 st.session_state.is_dirty = True
+                st.toast("Grammar saved!", icon="✅")
 
     # --- Tab 3: Shadowing & Utilization (Steps 7-10) ---
     with t3:
