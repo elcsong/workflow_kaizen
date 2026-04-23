@@ -1,7 +1,10 @@
 import json
+import logging
 import os
 from datetime import datetime
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 DATA_DIR = "english_app/data"
 SESSIONS_DIR = os.path.join(DATA_DIR, "sessions")
@@ -116,5 +119,5 @@ class SessionManager:
             
             return True
         except Exception as e:
-            print(f"Error deleting session {session_id}: {e}")
+            logger.exception("Error deleting session %s: %s", session_id, e)
             return False

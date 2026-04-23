@@ -1,10 +1,23 @@
-import os
-import google.generativeai as genai
-from openai import OpenAI
-from anthropic import Anthropic
+"""레거시 shim — 신규 `services/llm/` Registry를 이전 API 형태로 노출.
 
-# Model Map (Friendly Name -> API Model ID)
-MODELS = {
+Sprint 2에서 app.py를 최소 침습으로 유지하기 위한 호환 레이어.
+Sprint 4 모듈 분해 시 app.py가 registry를 직접 import하게 되면 삭제 예정.
+"""
+from __future__ import annotations
+
+import logging
+from typing import Iterator
+
+from english_app.services.llm.base import ProviderUnavailable
+from english_app.services.llm.registry import build_registry
+
+logger = logging.getLogger(__name__)
+
+_REGISTRY = build_registry()
+
+
+# 친화적 표시명 유지 (레거시 호환). Ollama는 동적 검출이라 ID 그대로.
+_FRIENDLY_NAMES: dict[str, dict[str, str]] = {
     "OpenAI": {
         "GPT-5 mini": "gpt-5-mini-2025-08-07",
         "GPT-5.1": "gpt-5.1-2025-11-13",
@@ -16,122 +29,85 @@ MODELS = {
     "Anthropic": {
         "Claude 4.5 Sonnet": "claude-sonnet-4-5",
         "Claude 4.5 Haiku": "claude-haiku-4-5",
-    }
+    },
 }
 
-def get_ai_explanation(text, provider, model_name, context=None):
-    """
-    Get grammar explanation from the selected AI provider.
-    """
-    context_prompt = ""
-    if context:
-        context_prompt = f"""
-## 📖 Context (Transcript)
-The following is the transcript of the video where the sentence appears. 
-Use this context to provide a more accurate interpretation of the meaning and nuance.
 
-<transcript>
-{context[:5000]}... (truncated if too long)
-</transcript>
-"""
+def _models_for(provider_name: str) -> dict[str, str]:
+    """UI에 노출할 '모델 표시명 → API 모델 ID' 매핑."""
+    if provider_name in _FRIENDLY_NAMES:
+        return dict(_FRIENDLY_NAMES[provider_name])
+    provider = _REGISTRY.get(provider_name)
+    if provider is None:
+        return {}
+    # Ollama: ID를 표시명으로 (gemma4:26b 등)
+    return {m: m for m in provider.list_models()}
 
-    system_prompt = f"""
-You are a Senior Linguistic Analysis Agent, powered by GPT-5. Your primary role is the **Deep Grammar Deconstructor**, specialized in analyzing complex English sentences (primarily from TED transcripts) to fundamentally enhance the user's comprehension, grammar, and composition skills.
 
-Your analysis must be **systematic, exhaustive, and highly educational**.
+# ---- 레거시 API 유지 ----
 
-{context_prompt}
+MODELS: dict[str, dict[str, str]] = {
+    "Ollama": _models_for("Ollama"),
+    "OpenAI": _models_for("OpenAI"),
+    "Gemini": _models_for("Gemini"),
+    "Anthropic": _models_for("Anthropic"),
+}
 
-## 🎯 Goal
 
-Analyze the user-provided sentence by breaking down its syntax, defining the grammatical function of every part, and providing practical composition guidance.
-
-## 📝 Analysis Structure & Step-by-Step Instructions
-
-You must follow these four mandatory steps in sequence:
-
-### 1. Structural Breakdown (The Core)
-
-* **Identify the Main Clause:** Explicitly state the complete main clause (Subject + Main Verb + Complement/Object).
-
-* **Deconstruct the Modifiers:** Identify every subordinate clause, phrase (prepositional, participial, infinitive, etc.), and single-word modifier. For each, state its function (e.g., "Adverbial Clause of Time," "Adjective Phrase modifying X").
-
-* **Visual Syntax Map:** Present the analysis in a clean, hierarchical bulleted list or a clear structural diagram to visually represent the sentence's syntax.
-
-### 2. Functional Deep Dive (The Usage)
-
-* **Grammatical Inquiry:** For any complex or ambiguous part of the sentence (e.g., an inversion, an implied element, a specific tense/aspect, a challenging noun clause), immediately ask the user a brief, focused question about its specific grammatical usage or role in the sentence. (e.g., "What is the specific subject of the verb 'was introduced' in this context?"). This creates a mandatory feedback loop for deeper learning.
-
-* **Explain the 'Why':** Explain the specific reason the TED speaker might have chosen this complex structure (e.g., emphasis, formal tone, combining ideas economically).
-
-### 3. Composition Bridging (The Application)
-
-* **Pattern Extraction:** Extract the core grammatical pattern or construct (e.g., "Not only X, but also Y," "The more X, the more Y") that defines the sentence's complexity.
-
-* **Parallel Composition:** Provide **three (3) new, original sentences** that utilize the *exact same* grammatical pattern, ensuring the examples are relevant to the user's goals (academic, professional, or complex descriptive contexts).
-
-### 4. Self-Reflection & Next Step (Agentic Closure)
-
-* **Agentic Check (Self-Correction):** Briefly review your own analysis to ensure all clauses have been accounted for and the explanation is non-contradictory. (Similar to the Agent's Self-Reflection principle).
-
-* **Final Prompt:** Conclude by asking the user to provide their answer to the **Grammatical Inquiry** from Step 2, or to provide the next complex sentence for analysis.
-
-## 🚧 Constraints
-
-- **Response Format:** Use clear Markdown formatting, including headings, bolding, and lists, for maximum clarity.
-
-- **Tone:** Be the voice of a senior, precise, and supportive linguistic expert.
-
-- **Avoid:** Jargon without immediate explanation.
-
-**return the results on Korean.**
-"""
-
+def stream_ai_explanation(
+    text: str,
+    provider: str,
+    model_name: str,
+    context: str | None = None,
+) -> Iterator[str]:
+    """신규 스트리밍 API — `st.write_stream()`에 직접 넘겨 사용."""
+    llm = _REGISTRY.get(provider)
+    if llm is None:
+        yield f"Error: Unknown provider '{provider}'"
+        return
+    prompt = _build_prompt(text)
     try:
-        if provider == "Gemini":
-            api_key = os.getenv("GEMINI_API_KEY")
-            if not api_key:
-                return "Error: GEMINI_API_KEY not found."
-            
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(f"{system_prompt}\n\nText to analyze:\n{text}")
-            return response.text
+        yield from llm.stream(prompt, model_name, context=context)
+    except ProviderUnavailable as exc:
+        yield f"Error: {exc}"
+    finish = llm.get_last_finish_reason()
+    if finish and finish not in {"end_turn", "stop", "stop_sequence"}:
+        logger.warning(
+            "Provider %s 종료 사유 비정상: %s — 응답이 잘렸을 수 있음",
+            provider,
+            finish,
+        )
 
-        elif provider == "OpenAI":
-            api_key = os.getenv("OPENAI_API_KEY")
-            if not api_key:
-                return "Error: OPENAI_API_KEY not found."
-            
-            client = OpenAI(api_key=api_key)
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": text}
-                ]
-            )
-            return response.choices[0].message.content
 
-        elif provider == "Anthropic":
-            api_key = os.getenv("CLAUDE_API_KEY")
-            if not api_key:
-                return "Error: CLAUDE_API_KEY not found."
-            
-            client = Anthropic(api_key=api_key)
-            response = client.messages.create(
-                model=model_name,
-                max_tokens=1024,
-                system=system_prompt,
-                messages=[
-                    {"role": "user", "content": text}
-                ]
-            )
-            return response.content[0].text
+def get_ai_explanation(
+    text: str,
+    provider: str,
+    model_name: str,
+    context: str | None = None,
+) -> str:
+    """레거시 동기 API — 스트림을 수집해 문자열로 반환 (기존 호출부 호환용)."""
+    chunks = list(stream_ai_explanation(text, provider, model_name, context))
+    return "".join(chunks)
 
-        else:
-            return "Error: Unknown provider."
 
-    except Exception as e:
-        return f"Error calling {provider} API: {str(e)}"
-
+def _build_prompt(text: str) -> str:
+    """기존 llm_helper의 system prompt를 Provider 중립 형태로 유지."""
+    return (
+        "You are a Senior Linguistic Analysis Agent specialized in deep grammar "
+        "deconstruction of English sentences (typically from TED transcripts).\n\n"
+        "## Goal\n"
+        "Analyze the user-provided sentence by breaking down its syntax, defining "
+        "the grammatical function of every part, and providing practical "
+        "composition guidance.\n\n"
+        "## Steps (mandatory, in order)\n"
+        "1. Structural Breakdown — identify main clause; deconstruct modifiers; "
+        "present a visual syntax map.\n"
+        "2. Functional Deep Dive — ask one focused grammar inquiry; explain why "
+        "the speaker chose this structure.\n"
+        "3. Composition Bridging — extract the core pattern; provide 3 original "
+        "parallel sentences.\n"
+        "4. Self-Reflection & Next Step — review your analysis; conclude with a "
+        "prompt for the user's response or next sentence.\n\n"
+        "Respond in Korean. Use Markdown with headings, bolding, and lists.\n\n"
+        f"Text to analyze:\n{text}"
+    )
