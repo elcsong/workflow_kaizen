@@ -9,7 +9,7 @@
 
 - **마지막 업데이트:** 2026-04-24
 - **활성 브랜치:** `main`
-- **마지막 커밋:** `3459fd3` (Sprint 4) → 추가 reduce 커밋 예정
+- **마지막 커밋:** `5717ed4` (refactor: reduce app.py to 288 lines, NFR-2 충족)
 - **모드:** Full (Speckit) — `specs/english_app_ux/` 완료 (일치율 95%)
 - **미해결 이슈:**
   - NFR-3 (커버리지 ≥80%) — 55%로 미달, UI render 함수는 Streamlit AppTest harness 별도 이터레이션 필요
@@ -20,7 +20,7 @@
 
 | 날짜 | 작업 | 세션 ID | 모드 | 커밋 | specs |
 |------|------|--------|------|------|-------|
-| 2026-04-23 ~ 04-24 | english_app UX/시인성/응답성 개선 (Sprint 1~4) | 43d310be | Full | 8b713f3 (1~3) + 3459fd3 (4) | `specs/english_app_ux/` |
+| 2026-04-23 ~ 04-24 | english_app UX/시인성/응답성 개선 (Sprint 1~4 + reduce) | 43d310be | Full | 8b713f3 → 3459fd3 → **5717ed4** | `specs/english_app_ux/` |
 
 ---
 
