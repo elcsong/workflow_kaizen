@@ -94,7 +94,7 @@
 | S4-5 | (S4-4와 통합 — 학습 뷰는 phase_tabs로 흡수) | - | ✅ | 43d310be | 2026-04-24 | pending |
 | S4-6 | `ui/components/player.py` — YouTube 플레이어 빌더/렌더 분리 | 2 | ✅ | 43d310be | 2026-04-24 | pending |
 | S4-7 | `ui/components/phase_tabs.py` — Phase 1/2/3 모두 분리 | 0 | ✅ | 43d310be | 2026-04-24 | pending |
-| S4-8 | `app.py` 1009 → **421 lines** (라우터 + 콜백 + 사이드바·LEFT col만 유지) | 0 | ⚠️ | 43d310be | 2026-04-24 | pending |
+| S4-8 | `app.py` 1009 → **288 lines** (사이드바·video_panel·fetch_video_info 추가 추출) | 2 | ✅ | 43d310be | 2026-04-24 | pending |
 | S4-9 | `services/progress.py` 등 신규 모듈 타입 어노테이션 100%, 핵심 services 100% | 5 | ✅ | 43d310be | 2026-04-24 | pending |
 | S4-10 | pytest 커버리지 측정: **52%** (UI render 함수 제외 시 ~78%) | 0 | ⚠️ | 43d310be | 2026-04-24 | pending |
 

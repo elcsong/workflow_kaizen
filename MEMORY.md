@@ -9,11 +9,10 @@
 
 - **마지막 업데이트:** 2026-04-24
 - **활성 브랜치:** `main`
-- **마지막 커밋:** `8b713f3` (Sprint 1-3) → 후속 Sprint 4 커밋 예정
-- **모드:** Full (Speckit) — `specs/english_app_ux/` 활성
+- **마지막 커밋:** `3459fd3` (Sprint 4) → 추가 reduce 커밋 예정
+- **모드:** Full (Speckit) — `specs/english_app_ux/` 완료 (일치율 95%)
 - **미해결 이슈:**
-  - NFR-2 (`app.py` ≤300 lines) — 421로 미달, spec 완화 권장
-  - NFR-3 (커버리지 ≥80%) — 52%로 미달, UI는 AppTest harness 별도 이터레이션 필요
+  - NFR-3 (커버리지 ≥80%) — 55%로 미달, UI render 함수는 Streamlit AppTest harness 별도 이터레이션 필요
 
 ---
 
@@ -21,14 +20,14 @@
 
 | 날짜 | 작업 | 세션 ID | 모드 | 커밋 | specs |
 |------|------|--------|------|------|-------|
-| 2026-04-23 ~ 04-24 | english_app UX/시인성/응답성 개선 (Sprint 1~4) | 43d310be | Full | 8b713f3 (1~3) + Sprint 4 미커밋 | `specs/english_app_ux/` |
+| 2026-04-23 ~ 04-24 | english_app UX/시인성/응답성 개선 (Sprint 1~4) | 43d310be | Full | 8b713f3 (1~3) + 3459fd3 (4) | `specs/english_app_ux/` |
 
 ---
 
 ## 알려진 이슈
 
-- [ ] **NFR-2 미달**: `app.py` 421 lines (목표 ≤300). 사이드바·LEFT col 추가 컴포넌트화 vs spec 완화(≤450) 결정 필요.
-- [ ] **NFR-3 미달**: pytest 커버리지 52% (목표 ≥80%). UI render 함수는 단위 테스트 어려움 → Streamlit AppTest harness 도입을 별도 이터레이션으로 분리.
+- [x] ~~NFR-2 미달~~: 사이드바 + video_panel + fetch_video_info 추출로 **288 lines** 달성 ✅
+- [ ] **NFR-3 미달**: pytest 커버리지 55% (목표 ≥80%). UI render 함수는 단위 테스트 어려움 → Streamlit AppTest harness 도입을 별도 이터레이션으로 분리.
 - [ ] **FR-7 부분 충족**: URL 입력 시 `st.rerun()` 유지. blur/Enter 명시적 콜백 패턴 미적용. 캐시로 fetch 비용 0이라 사용자 체감은 양호.
 - [ ] **S3-8 deferred**: History 테이블 `st.dataframe + on_select` 전환 — 다음 이터레이션 후보.
 
