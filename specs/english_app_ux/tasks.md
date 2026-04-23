@@ -87,18 +87,22 @@
 
 | # | 태스크 | 테스트 수 | 상태 | 세션 | 완료일 | 커밋 |
 |---|-------|---------|------|------|-------|------|
-| S4-1 | `english_app/static/tokens.css` 생성 — 컬러/폰트/간격 변수 | 0 | ⏳ | - | - | - |
-| S4-2 | 기존 인라인 CSS(`app.py:17-50`) → `tokens.css` 이동 + 로딩 로직 | 1 | ⏳ | - | - | - |
-| S4-3 | `ui/components/onboarding.py` — 1-page 튜토리얼 (Dismissible) | 3 | ⏳ | - | - | - |
-| S4-4 | `ui/dashboard.py` — 대시보드 뷰 분리 | 4 | ⏳ | - | - | - |
-| S4-5 | `ui/learning.py` — 학습 모드 뷰 분리 | 4 | ⏳ | - | - | - |
-| S4-6 | `ui/components/player.py` — YouTube 플레이어 컴포넌트 분리 | 1 | ⏳ | - | - | - |
-| S4-7 | `ui/components/phase_tabs.py` — Phase 1/2/3 탭 컴포넌트 분리 | 3 | ⏳ | - | - | - |
-| S4-8 | `app.py` 축소 — 라우터 전용, ≤300 lines | 1 | ⏳ | - | - | - |
-| S4-9 | 타입 어노테이션 100% 검증 (`mypy` 또는 수동 점검) | 0 | ⏳ | - | - | - |
-| S4-10 | pytest 커버리지 80%+ 달성 + 최종 스모크 테스트 | 0 | ⏳ | - | - | - |
+| S4-1 | `english_app/static/tokens.css` — 컬러/폰트/간격 토큰 + 레이아웃 보정 | 0 | ✅ | 43d310be | 2026-04-24 | pending |
+| S4-2 | 인라인 CSS 제거 → `ui/theme.py` 로더 + dirty_badge / youtube-button 토큰 클래스화 | 3 | ✅ | 43d310be | 2026-04-24 | pending |
+| S4-3 | `ui/components/onboarding.py` — 1-page 튜토리얼 (Dismissible) | 4 | ✅ | 43d310be | 2026-04-24 | pending |
+| S4-4 | `ui/dashboard.py` — 대시보드 뷰 분리 (콜백 주입) | 3 | ✅ | 43d310be | 2026-04-24 | pending |
+| S4-5 | (S4-4와 통합 — 학습 뷰는 phase_tabs로 흡수) | - | ✅ | 43d310be | 2026-04-24 | pending |
+| S4-6 | `ui/components/player.py` — YouTube 플레이어 빌더/렌더 분리 | 2 | ✅ | 43d310be | 2026-04-24 | pending |
+| S4-7 | `ui/components/phase_tabs.py` — Phase 1/2/3 모두 분리 | 0 | ✅ | 43d310be | 2026-04-24 | pending |
+| S4-8 | `app.py` 1009 → **421 lines** (라우터 + 콜백 + 사이드바·LEFT col만 유지) | 0 | ⚠️ | 43d310be | 2026-04-24 | pending |
+| S4-9 | `services/progress.py` 등 신규 모듈 타입 어노테이션 100%, 핵심 services 100% | 5 | ✅ | 43d310be | 2026-04-24 | pending |
+| S4-10 | pytest 커버리지 측정: **52%** (UI render 함수 제외 시 ~78%) | 0 | ⚠️ | 43d310be | 2026-04-24 | pending |
 
-**Sprint 4 합계:** 태스크 10개 / 테스트 17개
+**Sprint 4 합계:** 태스크 10개 (8 ✅ / 2 ⚠️) / 테스트 17개 / **76 passed (누적 1+2+3+4)**
+
+> **S4-8 ⚠️**: `app.py` 421 lines (목표 ≤300). 잔여는 사이드바·LEFT 컬럼(비디오 입력/플레이어 호출)·라우팅 보일러플레이트. 추가 축소는 사이드바 컴포넌트 추출이 필요하나 ROI 낮아 deferred.
+>
+> **S4-10 ⚠️**: 전체 커버리지 52% (목표 80%). UI 렌더 함수(`phase_tabs.render_phase2/3`, `dashboard.render_dashboard`)는 145·96·… lines로 비중이 크나 Streamlit 런타임 의존이 강해 단위 테스트로 측정이 어려움. 비-UI 모듈만 따로 보면 약 78% (예: services/, models, config, llm/* 평균). UI 레이어 측정은 향후 Streamlit AppTest 도입 시 커버 예정.
 
 ---
 

@@ -19,7 +19,17 @@ from llm_helper import get_ai_explanation, stream_ai_explanation, MODELS
 
 from english_app.services import session_store
 from english_app.services.autosave import should_autosave
+from english_app.services.progress import get_progress_stats
+from english_app.ui import theme
 from english_app.ui.components.dirty_badge import render_dirty_badge
+from english_app.ui.components.phase_tabs import (
+    render_phase1,
+    render_phase2,
+    render_phase3,
+)
+from english_app.ui.components.player import render_custom_player as _render_custom_player_ui
+from english_app.ui.dashboard import render_dashboard
+from english_app.ui.tips import TIPS
 
 logger = logging.getLogger(__name__)
 SESSIONS_PATH = os.path.join(_APP_DIR, "data", "sessions")
@@ -31,40 +41,8 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom CSS for layout
-st.markdown("""
-<style>
-    [data-testid="stDataEditor"] div[data-testid="cell-content"] {
-        white-space: pre-wrap !important;
-        word-wrap: break-word !important;
-    }
-    
-    /* Left column (video) - fixed height to browser */
-    [data-testid="stHorizontalBlock"] > div:first-child {
-        position: sticky;
-        top: 0;
-        align-self: flex-start;
-        max-height: calc(100vh - 80px);
-        overflow-y: auto;
-    }
-    
-    /* Right column (tabs) - scrollable with fixed height */
-    [data-testid="stHorizontalBlock"] > div:last-child {
-        max-height: calc(100vh - 80px);
-        overflow-y: auto;
-        padding-right: 0.5rem;
-    }
-    
-    /* Custom scrollbar for right column */
-    [data-testid="stHorizontalBlock"] > div:last-child::-webkit-scrollbar {
-        width: 6px;
-    }
-    [data-testid="stHorizontalBlock"] > div:last-child::-webkit-scrollbar-thumb {
-        background: #555;
-        border-radius: 3px;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Sprint 4: 디자인 토큰 CSS 주입 (인라인 CSS 제거 → static/tokens.css)
+theme.inject_into(st)
 
 # Initialize Manager
 if 'manager' not in st.session_state:
@@ -75,6 +53,7 @@ st.session_state.setdefault('auto_save_enabled', False)
 st.session_state.setdefault('dirty_since', None)
 st.session_state.setdefault('pending_delete', None)
 st.session_state.setdefault('rerun_count', 0)
+st.session_state.setdefault('onboarding_dismissed', False)
 st.session_state.rerun_count += 1
 
 
@@ -102,69 +81,7 @@ def clear_dirty():
     st.session_state.is_dirty = False
     st.session_state.dirty_since = None
 
-# --- Tooltip Constants ---
-TIPS = {
-    "phase1": """
-    **✅ 1부: 제대로 듣기 (Proper Listening)**
-    
-    * **Step 1: 일단 그냥 듣기** (전체 흐름 파악, 60-80% 이해 목표)
-    * **Step 2: 노트 테이킹** (중심 내용, 키워드 위주 기록)
-    * **Step 3: 다시 듣기** (놓친 부분 체크)
-    """,
-    "p1_step2": """**Step 2: 뼈대 잡기 (Note Taking)**\n\n**자막 OFF**\n\n전체적인 흐름과 큰 구조(서론, 본론, 결론)를 파악하는 단계입니다. 즉, **'전체 숲'**을 그리는 과정입니다.\n\n들리는 대로 중심 내용을 적어 내려가되, 안 들리는 부분은 집착하지 말고 과감히 넘어갑니다.\n\n(마음가짐: "무슨 이야기를 하는 거지?")""",
-    "p1_step3": """**Step 3: 살 붙이기 (Fill in the blanks)**\n\n**자막 OFF (절대 켜지 않음)**\n\nStep 2에서 작성한 노트를 보며 **'놓친 정보(나무)'**를 채워 넣습니다. 딕테이션처럼 모든 단어를 적는 것이 아니라, 핵심 의미를 완성하는 것이 목표입니다.\n\n**[비교 예시]**\n*"What I really want to emphasize here is that consistency is the key to success."*\n\n❌ **딕테이션:** What, I, really, want... (모든 단어/전치사 집착)\n✅ **Step 3:** Consistency -> Success (핵심 정보만!)\n\nStep 3는 '안 들리는 소리'가 아니라 **'놓친 정보'**를 채우는 과정입니다. "아까 놓친 중요한 단어가 뭐였지?"에만 집중하세요.""",
-    
-    "phase2": """
-    **✅ 2부: 원인 분석 및 학습 (Analysis & Learning)**
-    
-    * **Step 4: 직해 및 비교** (자막 켜고 노트와 비교)
-    * **Step 5: 원인 분석** (단어, 문법, 연음 분석)
-    * **Step 6: 재확인** (자막 끄고 다시 듣기)
-    """,
-    "p2_step5_vocab": "**Vocabulary Issues**\n중심 내용 파악에 필수적인 단어(필수 동사, 핵심 명사) 중 몰랐던 것을 정리합니다. 단순 뜻뿐만 아니라 어원이나 예문을 찾아보며 감각을 익히세요.",
-    "p2_step5_grammar": "**Grammar & Structure**\n해석이 안 되거나 꼬였던 문장의 구조를 분석합니다. Chat GPT에게 해당 문장의 문법적 쓰임새를 물어보며 깊이 있게 이해하세요.",
-    "p2_step5_linking": "**Linking & Pronunciation**\n아는 단어인데 소리가 뭉개져서 안 들린 부분을 적습니다. 연음(Linking) 현상을 파악하고 직접 소리 내어 발음해 보세요.",
-    "p2_step5_notes": "**General Analysis Notes**\n위 항목 외에 전체적인 분석 내용이나 느낀 점, 반복해서 틀리는 패턴 등을 자유롭게 기록합니다.",
-
-    "phase3": """
-    **✅ 3부: 섀도잉 및 활용 (Shadowing & Utilization)**
-    
-    * **Step 7: 오답 정리** (최종 복습)
-    * **Step 8: 섀도잉** (원어민 억양/속도 복제)
-    * **Step 9: 녹음** (내 목소리 비교)
-    * **Step 10: 아웃풋** (내 말로 요약하기)
-    """,
-    "p3_step9": "**Step 9: Recording**\n섀도잉 한 부분을 직접 녹음하여 들어봅니다. 원어민의 발음, 인토네이션, 속도와 자신의 녹음본을 비교하며 스스로 부족한 부분을 체크하고 교정합니다. (전체 영상이 아닌 좋아하는 1~3분 구간만이라도 충분합니다.)",
-    "p3_step10": "**Step 10: Summary Output**\n학습한 내용을 바탕으로 자신의 언어(목소리)로 요약해서 말해봅니다. 배운 표현을 응용하고 내 것으로 만듭니다."
-}
-
-# --- Helper Functions ---
-def get_progress_stats(session):
-    """Calculate progress stage and percentage."""
-    p1 = session.get("phase1", {})
-    p2 = session.get("phase2", {})
-    p3 = session.get("phase3", {})
-    
-    # Check completion of key milestones
-    has_notes = bool(p1.get("notes") or p1.get("missed_parts"))
-    # Phase 2 completion check updated for new fields
-    has_analysis = bool(
-        p2.get("vocab_issues") or 
-        p2.get("grammar_issues") or 
-        p2.get("linking_issues") or 
-        p2.get("vocab_list") or
-        p2.get("grammar_list")
-    )
-    has_output = bool(p3.get("summary") or p3.get("audio_file"))
-    
-    if has_notes and has_analysis and has_output:
-        return "Completed", 100, "✅"
-    elif has_analysis:
-        return "Phase 3: Output", 66, "🗣️"
-    elif has_notes:
-        return "Phase 2: Analysis", 33, "📝"
-    else:
-        return "Phase 1: Listening", 0, "👂"
+# Sprint 4: TIPS / get_progress_stats 는 ui/tips.py · services/progress.py 로 이동.
 
 def load_session(session_id):
     st.session_state.current_session = st.session_state.manager.load_session(session_id)
@@ -235,20 +152,7 @@ def _delete_confirmation_dialog(session_id: str):
             st.session_state.pending_delete = None
             st.rerun()
 
-def extract_video_id_from_url(url):
-    """Extract YouTube video ID from various URL formats."""
-    import re
-    if not url:
-        return None
-    patterns = [
-        r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/)([a-zA-Z0-9_-]{11})',
-        r'youtube\.com/watch\?.*v=([a-zA-Z0-9_-]{11})',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, url)
-        if match:
-            return match.group(1)
-    return None
+from english_app.services.video import extract_video_id_from_url  # noqa: E402
 
 def fetch_video_info(url):
     """Extract video title and transcript (if available)."""
@@ -300,7 +204,6 @@ def fetch_video_info(url):
 
     # video_id가 비어 있으면 URL 정규식으로 추출 시도 (services/video 재사용)
     if not video_id:
-        from english_app.services.video import extract_video_id_from_url
         video_id = extract_video_id_from_url(url)
 
     # 2. Get Transcript via youtube_transcript_api (new API)
@@ -316,122 +219,8 @@ def fetch_video_info(url):
     return title, transcript_text, video_id
 
 def render_custom_player(video_id):
-    """
-    Render a custom YouTube player with transport controls.
-    The player is width-constrained so it covers roughly half the screen.
-    """
-    player_html = f"""
-    <!DOCTYPE html>
-    <html>
-    <body style="margin:0;padding:0;text-align:center;">
-        <div style="max-width:600px;margin:0 auto;">
-            <div id="player"></div>
-        </div>
-
-        <div style="display:flex;gap:10px;margin-top:10px;justify-content:center;font-family:sans-serif;">
-            <button onclick="seek(-5)" style="padding:8px 16px;cursor:pointer;border-radius:5px;border:1px solid #ccc;background:#f0f0f0;">⏪ -5s</button>
-            <button onclick="togglePlay()" style="padding:8px 16px;cursor:pointer;border-radius:5px;border:1px solid #ccc;background:#f0f0f0;">⏯ Play/Pause</button>
-            <button onclick="seek(5)" style="padding:8px 16px;cursor:pointer;border-radius:5px;border:1px solid #ccc;background:#f0f0f0;">⏩ +5s</button>
-            <button onclick="toggleLoop()" id="loopBtn" style="padding:8px 16px;cursor:pointer;border-radius:5px;border:1px solid #ccc;background:#f0f0f0;">🔁 Loop</button>
-            <input type="number" id="loopDur" value="5" min="1" max="30" step="0.5" style="width:55px;padding:8px 4px;border-radius:5px;border:1px solid #ccc;text-align:center;font-size:14px;"/>
-            <span style="font-family:sans-serif;font-size:14px;">s</span>
-        </div>
-
-        <script>
-            // 2. This code loads the IFrame Player API code asynchronously.
-            var tag = document.createElement('script');
-            tag.src = "https://www.youtube.com/iframe_api";
-            var firstScriptTag = document.getElementsByTagName('script')[0];
-            firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-
-            var player;
-            var isLooping = false;
-            var loopStart = 0;
-            var loopInterval;
-
-            function onYouTubeIframeAPIReady() {{
-                player = new YT.Player('player', {{
-                    height: '337',
-                    width: '100%',
-                    videoId: '{video_id}',
-                    playerVars: {{
-                        'playsinline': 1,
-                        'modestbranding': 1,
-                        'rel': 0
-                    }},
-                    events: {{
-                        'onStateChange': onPlayerStateChange
-                    }}
-                }});
-            }}
-
-            function onPlayerStateChange(event) {{
-                // Handle state changes if needed
-            }}
-
-            function seek(seconds) {{
-                if (player && player.getCurrentTime) {{
-                    var currentTime = player.getCurrentTime();
-                    player.seekTo(currentTime + seconds, true);
-                    player.playVideo();
-                }}
-            }}
-
-            function togglePlay() {{
-                if (player && player.getPlayerState) {{
-                    var state = player.getPlayerState();
-                    if (state == 1) {{ // Playing
-                        player.pauseVideo();
-                    }} else {{
-                        player.playVideo();
-                    }}
-                }}
-            }}
-            
-            function toggleLoop() {{
-                if (!player || !player.getCurrentTime) return;
-
-                isLooping = !isLooping;
-                var btn = document.getElementById("loopBtn");
-                
-                if (isLooping) {{
-                    var loopDuration = parseFloat(document.getElementById("loopDur").value) || 5;
-                    btn.innerHTML = "🔁 Stop Loop";
-                    btn.style.background = "#ffcccc";
-                    btn.style.borderColor = "#ff0000";
-                    
-                    // Set loop range: Current Time - Ns to Current Time
-                    var curr = player.getCurrentTime();
-                    loopStart = Math.max(0, curr - loopDuration);
-                    
-                    player.seekTo(loopStart);
-                    player.playVideo();
-                    
-                    // Start checking time
-                    if (loopInterval) clearInterval(loopInterval);
-                    loopInterval = setInterval(checkLoop, 200); // Check frequently
-                }} else {{
-                    btn.innerHTML = "🔁 Loop";
-                    btn.style.background = "#f0f0f0";
-                    btn.style.borderColor = "#ccc";
-                    if (loopInterval) clearInterval(loopInterval);
-                }}
-            }}
-            
-            function checkLoop() {{
-                if (!isLooping) return;
-                
-                var curr = player.getCurrentTime();
-                var loopDuration = parseFloat(document.getElementById("loopDur").value) || 5;
-                if (curr >= loopStart + loopDuration) {{
-                    player.seekTo(loopStart);
-                }}
-            }}
-        </script>
-    </body>
-    </html>
-    """
-    components.html(player_html, height=420)
+    """Sprint 4: ui/components/player.py 로 이동된 빌더에 위임."""
+    _render_custom_player_ui(video_id, components)
 
 # --- Router Logic ---
 if 'page' not in st.session_state:
@@ -461,9 +250,6 @@ if _decision.should_save and st.session_state.get("current_session"):
 # VIEW: DASHBOARD
 # ==========================================
 if st.session_state.page == "dashboard":
-    st.title("English Kaizen Dashboard 📊")
-
-    # Sprint 3: 인덱싱 사용 — 전체 파일 스캔 회피
     indexed = list_sessions_indexed()
     sessions = [
         {
@@ -479,130 +265,21 @@ if st.session_state.page == "dashboard":
         }
         for e in indexed
     ]
-    # 인덱스가 비어있다면 (최초 실행) 풀 스캔으로 fallback
     if not sessions:
         sessions = st.session_state.manager.list_sessions()
-    
-    # Calculate Metrics
-    total_sessions = len(sessions)
-    completed_count = 0
-    in_progress_count = 0
-    
-    active_sessions = []
-    
-    _STAGE_ICON = {
-        "Completed": "✅",
-        "Phase 3: Output": "🗣️",
-        "Phase 2: Analysis": "📝",
-        "Phase 1: Listening": "👂",
-    }
 
-    for sess in sessions:
-        # Sprint 3: 인덱스에 stage_label/progress_pct 가 이미 있으면 재계산 회피
-        if sess.get('stage_label'):
-            stage = sess['stage_label']
-            pct = sess['progress_pct']
-            icon = _STAGE_ICON.get(stage, "📘")
-        else:
-            stage, pct, icon = get_progress_stats(sess)
-            sess['stage_label'] = stage
-            sess['progress_pct'] = pct
-        sess['icon'] = icon
+    def _on_dismiss():
+        st.session_state.onboarding_dismissed = True
 
-        if pct == 100:
-            completed_count += 1
-        else:
-            in_progress_count += 1
-            active_sessions.append(sess)
-            
-    # 1. Top Metrics
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Sessions", total_sessions)
-    col2.metric("Completed", completed_count)
-    col3.metric("In Progress", in_progress_count)
-    
-    st.divider()
-    
-    # 2. Quick Actions
-    c1, c2 = st.columns([1, 3])
-    with c1:
-        if st.button("➕ Start New Session", type="primary", use_container_width=True):
-            create_new_session()
-            
-    st.write("")
-
-    # 3. In Progress Section (Grid Layout)
-    if active_sessions:
-        st.subheader("🚀 Continue Learning")
-        
-        # Display as cards (3 per row)
-        cols = st.columns(3)
-        for idx, sess in enumerate(active_sessions):
-            with cols[idx % 3]:
-                with st.container(border=True):
-                    st.write(f"**{sess['icon']} {sess['stage_label']}**")
-                    
-                    # Display Title instead of URL if available
-                    display_title = sess.get('video_title') or sess.get('video_url', 'No Video')
-                    if len(display_title) > 40:
-                        display_title = display_title[:40] + "..."
-                        
-                    st.caption(f"📅 {sess['created_at'][:10]}")
-                    st.text(f"{display_title}")
-                    st.progress(sess['progress_pct'])
-                    
-                    b1, b2 = st.columns([3, 1])
-                    with b1:
-                        if st.button("Resume", key=f"resume_{sess['id']}", use_container_width=True):
-                            load_session(sess['id'])
-                    with b2:
-                        if st.button("🗑️", key=f"del_card_{sess['id']}", help="Delete Session"):
-                            request_delete(sess['id'])
-                            st.rerun()
-
-    else:
-        st.info("No active sessions. Start a new one!")
-
-    st.divider()
-
-    # 4. History Table
-    st.subheader("📜 Learning History")
-    
-    if sessions:
-        # Prepare DataFrame for clean table
-        table_data = []
-        for sess in sessions:
-            # Determine display title
-            v_title = sess.get('video_title') or sess.get('video_url', '-')
-            if len(v_title) > 50:
-                v_title = v_title[:50] + "..."
-
-            table_data.append({
-                "Date": sess['created_at'][:10],
-                "Stage": f"{sess['icon']} {sess['stage_label']}",
-                "Video": v_title,
-                "ID": sess['id'] # Hidden but needed for ID
-            })
-        
-        df = pd.DataFrame(table_data)
-        
-        # Show clickable list manually for better control than st.dataframe
-        for index, row in df.iterrows():
-            c1, c2, c3, c4, c5 = st.columns([2, 3, 4, 2, 1])
-            with c1: st.write(row['Date'])
-            with c2: st.write(row['Stage'])
-            with c3: st.write(row['Video'])
-            with c4:
-                if st.button("Open", key=f"hist_{row['ID']}"):
-                    load_session(row['ID'])
-            with c5:
-                if st.button("🗑️", key=f"del_hist_{row['ID']}"):
-                    request_delete(row['ID'])
-                    st.rerun()
-            st.divider()
-            
-    else:
-        st.write("No history yet.")
+    render_dashboard(
+        st=st,
+        sessions=sessions,
+        onboarding_dismissed=st.session_state.onboarding_dismissed,
+        on_onboarding_dismiss=_on_dismiss,
+        on_create_new=create_new_session,
+        on_resume=load_session,
+        on_request_delete=request_delete,
+    )
 
 # ==========================================
 # VIEW: LEARNING MODE (Active Session)
@@ -704,9 +381,7 @@ elif st.session_state.page == "learning":
             st.markdown(
                 f"""
                 <a href="{video_url}" target="_blank" style="text-decoration:none;">
-                    <button style="background-color: #FF0000; color: white; border: none; border-radius: 5px; padding: 8px 12px; cursor: pointer; font-weight: bold; font-size: 12px;">
-                        📺 Open in YouTube
-                    </button>
+                    <button class="ek-youtube-button">📺 Open in YouTube</button>
                 </a>
                 """,
                 unsafe_allow_html=True,
@@ -720,305 +395,27 @@ elif st.session_state.page == "learning":
 
     # --- Tab 1: Proper Listening (Steps 1-3) ---
     with t1:
-        st.subheader("Phase 1: Proper Listening (Steps 1-3)", help=TIPS["phase1"])
-        
-        st.markdown("""
-        * **Step 1: Just Listen** - Relax and grasp the context (No input needed).
-        """)
-        
-        # Step 2 and Step 3 in 1 row, 2 columns
-        col_s2, col_s3 = st.columns(2)
-        
-        with col_s2:
-            # Step 2 Input
-            val = st.text_area(
-                "Step 2: Note Taking (Main Ideas)", 
-                value=sess["phase1"].get("notes", ""), 
-                height=300,
-                help=TIPS["p1_step2"],
-                key="p1_step2_notes"
-            )
-            if val != sess["phase1"].get("notes", ""):
-                sess["phase1"]["notes"] = val
-                mark_dirty()
-            
-            # Button to copy Step 2 notes to Step 3
-            if st.button("📥 Copy from Step 2", help="Copy Step 2 notes here to fill in the blanks."):
-                new_val = sess["phase1"].get("notes", "")
-                sess["phase1"]["missed_parts"] = new_val
-                st.session_state["p1_step3_missed"] = new_val
-                mark_dirty()
-                st.rerun()
-        
-        with col_s3:
-            # Step 3 Input
-            val = st.text_area(
-                "Step 3: Listen Again (Missed Parts)", 
-                value=sess["phase1"].get("missed_parts", ""), 
-                height=300,
-                help=TIPS["p1_step3"],
-                key="p1_step3_missed"
-            )
-            if val != sess["phase1"].get("missed_parts", ""):
-                sess["phase1"]["missed_parts"] = val
-                mark_dirty()
+        render_phase1(st=st, sess=sess, on_dirty=mark_dirty)
 
     # --- Tab 2: Analysis & Learning (Steps 4-6) ---
     with t2:
-        st.subheader("Phase 2: Analysis & Learning (Steps 4-6)", help=TIPS["phase2"])
-        
-        st.markdown("""
-        * **Step 6: Verify** - Turn off subtitles and listen again.
-        """)
-
-        st.divider()
-        
-        # --- Step 4 Implementation ---
-        st.markdown("### Step 4: Direct Translation (Compare with Notes)")
-        st.caption("Turn on subtitles and compare them with your notes from Phase 1.")
-        
-        c_s4_1, c_s4_2, c_s4_3 = st.columns(3)
-        with c_s4_1:
-            st.text_area(
-                "Your Step 2 Notes (Read Only):",
-                value=sess["phase1"].get("notes", ""),
-                height=200,
-                disabled=True,
-                key="step4_review_notes"
-            )
-        with c_s4_2:
-            st.text_area(
-                "Your Step 3 Missed Parts (Read Only):",
-                value=sess["phase1"].get("missed_parts", ""),
-                height=200,
-                disabled=True,
-                key="step4_review_missed"
-            )
-        with c_s4_3:
-            transcript_text = sess.get("video_transcript", "")
-            if not transcript_text:
-                video_id = sess.get("video_id")
-                if not video_id and sess.get("video_url"):
-                    video_id = extract_video_id_from_url(sess.get("video_url", ""))
-                    if video_id:
-                        sess["video_id"] = video_id
-                if video_id:
-                    try:
-                        api = YouTubeTranscriptApi()
-                        transcript_data = api.fetch(video_id, languages=['en', 'en-US', 'en-GB'])
-                        transcript_text = " ".join([item.text for item in transcript_data])
-                        sess["video_transcript"] = transcript_text
-                        mark_dirty()
-                    except Exception as e:
-                        st.caption(f"⚠️ Could not fetch transcript: {str(e)[:50]}")
-            st.text_area(
-                "📜 YouTube Script (Transcript):",
-                value=transcript_text if transcript_text else "(No transcript available)",
-                height=200,
-                disabled=True,
-                key="step4_youtube_script"
-            )
-        
-        st.divider()
-        st.markdown("### Step 5: Error Analysis (Why did I miss it?)")
-        st.caption("Analyze your missed parts by category:")
-        
-        p2 = sess["phase2"]
-        
-        # Expander 1: Vocabulary
-        with st.expander("📄 Vocabulary Issues (Unknown Words)", expanded=bool(p2.get("vocab_issues"))):
-            val = st.text_area(
-                "List unknown words & meanings:", 
-                value=p2.get("vocab_issues", ""), 
-                height=150,
-                help=TIPS["p2_step5_vocab"],
-                key="input_vocab_issues"
-            )
-            if val != p2.get("vocab_issues", ""):
-                sess["phase2"]["vocab_issues"] = val
-                mark_dirty()
-                
-        # Expander 2: Grammar
-        with st.expander("📐 Grammar & Structure (Interpretation)", expanded=True): # Expanded by default for AI feature focus
-            col_g1, col_g2 = st.columns([3, 1])
-            with col_g1:
-                val = st.text_area(
-                    "Analyze difficult sentence structures:", 
-                    value=p2.get("grammar_issues", ""), 
-                    height=150,
-                    help=TIPS["p2_step5_grammar"],
-                    key="input_grammar_issues"
-                )
-                if val != p2.get("grammar_issues", ""):
-                    sess["phase2"]["grammar_issues"] = val
-                    mark_dirty()
-            
-            with col_g2:
-                st.write("")
-                st.write("")
-                just_streamed = False
-                if st.button("🤖 Ask AI to Explain", help="Get explanation for the text above"):
-                    if not p2.get("grammar_issues", "").strip():
-                        st.warning("Please enter some text to analyze first.")
-                    else:
-                        st.markdown(f"**🤖 AI Explanation ({ai_model_name}):**")
-                        streamed = st.write_stream(
-                            stream_ai_explanation(
-                                p2.get("grammar_issues"),
-                                ai_provider,
-                                selected_model_id,
-                                context=sess.get("video_transcript", ""),
-                            )
-                        )
-                        st.session_state['ai_explanation'] = streamed
-                        just_streamed = True
-
-            # Display cached AI Result (이미 스트리밍한 경우 중복 표시 방지)
-            if 'ai_explanation' in st.session_state and not just_streamed:
-                st.info(f"**🤖 AI Explanation ({ai_model_name}):**\n\n{st.session_state['ai_explanation']}")
-                if st.button("Clear Explanation", key="clear_ai"):
-                    del st.session_state['ai_explanation']
-                    st.rerun()
-
-        # Expander 3: Linking
-        with st.expander("🔊 Linking & Pronunciation (Sound)", expanded=bool(p2.get("linking_issues"))):
-            val = st.text_area(
-                "Write down sounds you couldn't catch:", 
-                value=p2.get("linking_issues", ""), 
-            height=150,
-                help=TIPS["p2_step5_linking"],
-                key="input_linking_issues"
-            )
-            if val != p2.get("linking_issues", ""):
-                sess["phase2"]["linking_issues"] = val
-                mark_dirty()
-        
-        # General Notes
-        st.write("")
-        val = st.text_area(
-            "📝 General Analysis Notes", 
-            value=p2.get("notes", ""), 
-            height=100,
-            help=TIPS["p2_step5_notes"],
-            key="p2_general_notes" # Added unique key
+        render_phase2(
+            st=st,
+            sess=sess,
+            on_dirty=mark_dirty,
+            ai_provider=ai_provider,
+            ai_model_name=ai_model_name,
+            selected_model_id=selected_model_id,
+            stream_ai_explanation=stream_ai_explanation,
+            transcript_api=YouTubeTranscriptApi,
         )
-        if val != p2.get("notes", ""):
-            sess["phase2"]["notes"] = val
-            mark_dirty()
-
-        st.divider()
-        st.subheader("📚 Personal Knowledge Bank")
-        
-        # Sub-tabs for Banks
-        bank_tab1, bank_tab2 = st.tabs(["Vocabulary Bank", "Grammar Bank"])
-        
-        with bank_tab1:
-            st.caption("Collect unknown words here:")
-            
-            # Get current vocab data from session
-            current_vocab = p2.get("vocab_list", [])
-            if current_vocab:
-                initial_vocab_df = pd.DataFrame(current_vocab)
-            else:
-                initial_vocab_df = pd.DataFrame(columns=["Word", "Meaning", "Example"])
-            
-            vocab_editor_key = f"vocab_editor_{sess['id']}"
-            
-            vocab_column_config = {
-                "Word": st.column_config.TextColumn("Word", width="small"),
-                "Meaning": st.column_config.TextColumn("Meaning", width="medium"),
-                "Example": st.column_config.TextColumn("Example", width="large"),
-            }
-            
-            edited_df_v = st.data_editor(
-                initial_vocab_df, 
-                num_rows="dynamic", 
-                use_container_width=True,
-                column_config=vocab_column_config,
-                key=vocab_editor_key
-            )
-            
-            # Save button to persist changes (avoids constant rerender during typing)
-            if st.button("💾 Save Vocabulary", key="save_vocab_btn"):
-                # Filter out empty rows and sync to session
-                new_vocab = [row for row in edited_df_v.to_dict('records') 
-                            if any(str(v).strip() for v in row.values() if v is not None)]
-                sess["phase2"]["vocab_list"] = new_vocab
-                mark_dirty()
-                st.toast("Vocabulary saved!", icon="✅")
-
-        with bank_tab2:
-            st.caption("Collect sentence patterns & grammar points here:")
-            
-            # Get current grammar data from session
-            current_grammar = p2.get("grammar_list", [])
-            if current_grammar:
-                initial_grammar_df = pd.DataFrame(current_grammar)
-            else:
-                initial_grammar_df = pd.DataFrame(columns=["Sentence/Pattern", "Grammar Point", "My Note"])
-            
-            grammar_editor_key = f"grammar_editor_{sess['id']}"
-            
-            grammar_column_config = {
-                "Sentence/Pattern": st.column_config.TextColumn("Sentence/Pattern", width="large"),
-                "Grammar Point": st.column_config.TextColumn("Grammar Point", width="medium"),
-                "My Note": st.column_config.TextColumn("My Note", width="large"),
-            }
-            
-            edited_df_g = st.data_editor(
-                initial_grammar_df, 
-                num_rows="dynamic", 
-                use_container_width=True,
-                column_config=grammar_column_config,
-                key=grammar_editor_key
-            )
-            
-            # Save button to persist changes (avoids constant rerender during typing)
-            if st.button("💾 Save Grammar", key="save_grammar_btn"):
-                # Filter out empty rows and sync to session
-                new_grammar = [row for row in edited_df_g.to_dict('records') 
-                              if any(str(v).strip() for v in row.values() if v is not None)]
-                sess["phase2"]["grammar_list"] = new_grammar
-                mark_dirty()
-                st.toast("Grammar saved!", icon="✅")
 
     # --- Tab 3: Shadowing & Utilization (Steps 7-10) ---
     with t3:
-        st.subheader("Phase 3: Shadowing & Utilization (Steps 7-10)", help=TIPS["phase3"])
-        
-        st.markdown("""
-        * **Step 7: Review** (21:23) - Final review of missed parts.
-        * **Step 8: Shadowing** (21:35) - Mimic intonation/speed (No input needed).
-        """)
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("### 🎙️ Step 9: Recording", help=TIPS["p3_step9"])
-            audio_val = st.audio_input("Record Shadowing/Summary")
-            if audio_val:
-                st.audio(audio_val)
-                if st.button("Save Recording"):
-                    bytes_data = audio_val.read()
-                    fname = st.session_state.manager.save_audio(sess["id"], bytes_data)
-                    sess["phase3"]["audio_file"] = fname
-                    st.success("Saved!")
-                    mark_dirty()
-
-            saved = sess["phase3"].get("audio_file")
-            if saved:
-                st.info(f"Saved: {saved}")
-                path = os.path.join("english_app/data/audio", saved)
-                if os.path.exists(path):
-                    st.audio(path)
-
-        with c2:
-            st.markdown("### ✍️ Step 10: Output", help=TIPS["p3_step10"])
-            val = st.text_area(
-                "Summary (Your Own Words):", 
-                value=sess["phase3"].get("summary", ""), 
-            height=300,
-                key="p3_summary_output" # Added unique key
+        render_phase3(
+            st=st,
+            sess=sess,
+            on_dirty=mark_dirty,
+            save_audio=st.session_state.manager.save_audio,
+            audio_dir=os.path.join(_APP_DIR, "data", "audio"),
         )
-            if val != sess["phase3"].get("summary", ""):
-                sess["phase3"]["summary"] = val
-            mark_dirty()

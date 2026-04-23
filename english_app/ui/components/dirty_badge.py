@@ -9,9 +9,7 @@ class _StreamlitLike(Protocol):
 
 
 _BADGE_HTML = (
-    '<div style="position:sticky;top:0;z-index:9999;'
-    'background:#FFF3CD;color:#856404;padding:6px 12px;border-radius:4px;'
-    'border:1px solid #FFEEBA;font-size:13px;text-align:center;margin-bottom:8px;">'
+    '<div class="ek-dirty-badge">'
     '● Unsaved changes — 변경사항이 저장되지 않았습니다</div>'
 )
 
