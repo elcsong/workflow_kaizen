@@ -5,6 +5,7 @@ from typing import Callable, Mapping, Sequence
 
 import pandas as pd
 
+from english_app.services.flashcards import CardStats
 from english_app.services.progress import get_progress_stats
 from english_app.ui.components.onboarding import (
     ONBOARDING_BODY_MD,
@@ -53,6 +54,9 @@ def render_dashboard(
     on_create_new: Callable[[], None],
     on_resume: Callable[[str], None],
     on_request_delete: Callable[[str], None],
+    card_stats: CardStats | None = None,
+    on_start_review: Callable[[], None] | None = None,
+    on_rebuild_index: Callable[[], None] | None = None,
 ) -> None:
     """대시보드 전체 렌더. 콜백으로 외부 의존성을 주입해 테스트 가능."""
     st.title("English Kaizen Dashboard 📊")
@@ -67,6 +71,15 @@ def render_dashboard(
             if st.button("✓ 알겠어요, 시작할게요", type="primary"):
                 on_onboarding_dismiss()
                 st.rerun()
+
+    # 🎴 Today's Review (Flash Cards)
+    if card_stats is not None and on_start_review is not None:
+        _render_review_section(
+            st=st,
+            stats=card_stats,
+            on_start_review=on_start_review,
+            on_rebuild_index=on_rebuild_index,
+        )
 
     enriched, completed, in_progress = _enrich_with_stage(sessions)
     active = [s for s in enriched if s["progress_pct"] != 100]
@@ -144,5 +157,53 @@ def render_dashboard(
         with c5:
             if st.button("🗑️", key=f"del_hist_{row['ID']}"):
                 on_request_delete(row["ID"])
+                st.rerun()
+        st.divider()
+
+
+def _render_review_section(
+    *,
+    st,
+    stats: CardStats,
+    on_start_review: Callable[[], None],
+    on_rebuild_index: Callable[[], None] | None,
+) -> None:
+    """대시보드 상단 Today's Review 카드."""
+    with st.container(border=True):
+        head_cols = st.columns([3, 1])
+        with head_cols[0]:
+            st.subheader("🎴 Today's Review")
+        with head_cols[1]:
+            if on_rebuild_index is not None:
+                if st.button(
+                    "🔄 Rebuild",
+                    help="카드 인덱스 재빌드 (세션 변경 반영)",
+                    use_container_width=True,
+                    key="dash_rebuild_idx",
+                ):
+                    on_rebuild_index()
+                    st.toast("인덱스를 재빌드했습니다.", icon="🔄")
+                    st.rerun()
+
+        m_cols = st.columns(4)
+        m_cols[0].metric("due 오늘", stats.due_today)
+        m_cols[1].metric("신규", stats.new)
+        m_cols[2].metric("학습 중", stats.learning)
+        m_cols[3].metric("마스터", stats.mature)
+
+        if stats.total == 0:
+            st.info(
+                "아직 카드가 없어요. Phase 2 Quick Capture로 단어를 캡처하면 "
+                "자동으로 Bank에 쌓입니다."
+            )
+        elif stats.due_today == 0:
+            st.success("오늘 복습할 카드가 없어요. 잘 하고 있어요! 🎉")
+        else:
+            if st.button(
+                f"▶ Start Review ({stats.due_today}장)",
+                type="primary",
+                key="dash_start_review",
+            ):
+                on_start_review()
                 st.rerun()
         st.divider()

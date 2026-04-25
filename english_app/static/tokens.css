@@ -117,3 +117,29 @@
   padding: var(--space-6);
   margin-bottom: var(--space-4);
 }
+
+/* ===== Flash Card ===== */
+.ek-flashcard-front {
+  font-size: 2.25rem;
+  font-weight: 700;
+  text-align: center;
+  padding: var(--space-8) var(--space-4);
+  color: var(--color-text);
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.ek-flashcard-section {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+.ek-review-stats {
+  display: flex;
+  gap: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}

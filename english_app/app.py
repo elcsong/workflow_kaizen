@@ -20,7 +20,7 @@ from llm_helper import (
     stream_ai_summary_critique,
 )
 
-from english_app.services import session_store
+from english_app.services import flashcards, session_store
 from english_app.services.autosave import should_autosave
 from english_app.services.progress import get_progress_stats
 from english_app.ui import theme
@@ -34,10 +34,12 @@ from english_app.ui.components.player import render_custom_player as _render_cus
 from english_app.ui.components.sidebar import render_sidebar
 from english_app.ui.components.video_panel import render_video_panel
 from english_app.ui.dashboard import render_dashboard
+from english_app.ui.review import init_review_session, render_review
 from english_app.ui.tips import TIPS
 
 logger = logging.getLogger(__name__)
 SESSIONS_PATH = os.path.join(_APP_DIR, "data", "sessions")
+REVIEW_PATH = os.path.join(_APP_DIR, "data", "review")
 
 # Page Configuration
 st.set_page_config(
@@ -107,6 +109,8 @@ def save_current_session():
     session_store.upsert_entry(
         Path(SESSIONS_PATH), st.session_state.current_session
     )
+    # Flash card 인덱스도 sync (변경된 vocab/grammar 반영)
+    flashcards.sync_session_cards(Path(SESSIONS_PATH), Path(REVIEW_PATH))
     clear_dirty()
     st.toast("Session Saved!", icon="💾")
 
@@ -120,6 +124,8 @@ def _do_delete(session_id: str):
     if success:
         from pathlib import Path
         session_store.remove_entry(Path(SESSIONS_PATH), session_id)
+        # Flash card orphan 제거
+        flashcards.sync_session_cards(Path(SESSIONS_PATH), Path(REVIEW_PATH))
         st.toast("Session Deleted", icon="🗑️")
         if (
             st.session_state.current_session
@@ -195,6 +201,9 @@ if _decision.should_save and st.session_state.get("current_session"):
 # VIEW: DASHBOARD
 # ==========================================
 if st.session_state.page == "dashboard":
+    from datetime import date as _date
+    from pathlib import Path as _Path
+
     indexed = list_sessions_indexed()
     sessions = [
         {
@@ -216,6 +225,28 @@ if st.session_state.page == "dashboard":
     def _on_dismiss():
         st.session_state.onboarding_dismissed = True
 
+    # Flash card 인덱스 자동 빌드 + stagger (최초 1회)
+    _today = _date.today()
+    _all_cards = flashcards.sync_session_cards(
+        _Path(SESSIONS_PATH), _Path(REVIEW_PATH)
+    )
+    if any(not c.due_date for c in _all_cards):
+        _all_cards = flashcards.stagger_initial_due_dates(
+            _all_cards, today=_today
+        )
+        # 인덱스 재저장
+        for _card in _all_cards:
+            flashcards.upsert_card(_Path(REVIEW_PATH), _card)
+    _card_stats = flashcards.compute_stats(_all_cards, today=_today)
+
+    def _start_review():
+        due = flashcards.load_due_cards(_Path(REVIEW_PATH), today=_today)
+        init_review_session(st, due)
+        st.session_state.page = "review"
+
+    def _rebuild_idx():
+        flashcards.rebuild_index(_Path(SESSIONS_PATH), _Path(REVIEW_PATH))
+
     render_dashboard(
         st=st,
         sessions=sessions,
@@ -224,6 +255,27 @@ if st.session_state.page == "dashboard":
         on_create_new=create_new_session,
         on_resume=load_session,
         on_request_delete=request_delete,
+        card_stats=_card_stats,
+        on_start_review=_start_review,
+        on_rebuild_index=_rebuild_idx,
+    )
+
+# ==========================================
+# VIEW: REVIEW MODE (Flash Cards)
+# ==========================================
+elif st.session_state.page == "review":
+    from datetime import date as _date
+    from pathlib import Path as _Path
+
+    def _back_to_dashboard():
+        st.session_state.page = "dashboard"
+        st.rerun()
+
+    render_review(
+        st=st,
+        review_dir=_Path(REVIEW_PATH),
+        today=_date.today(),
+        on_back_to_dashboard=_back_to_dashboard,
     )
 
 # ==========================================
