@@ -75,7 +75,6 @@ def render_phase2(
     ai_provider: str,
     ai_model_name: str,
     selected_model_id: str,
-    stream_ai_explanation: Callable[..., Any],
     transcript_api,
     extract_knowledge_entry: Callable[..., Any] | None = None,
 ) -> None:
@@ -148,71 +147,6 @@ def render_phase2(
         extract_knowledge_entry=extract_knowledge_entry,
     )
 
-    st.divider()
-
-    # Grammar AI Tutor — 긴 문장 심화 분석은 별도 유지
-    with st.expander("📐 Grammar Deep Dive (긴 문장 심화 분석)", expanded=False):
-        col_g1, col_g2 = st.columns([3, 1])
-        with col_g1:
-            val = st.text_area(
-                "Analyze difficult sentence structures:",
-                value=p2.get("grammar_issues", ""),
-                height=150,
-                help=TIPS["p2_step5_grammar"],
-                key="input_grammar_issues",
-            )
-            if val != p2.get("grammar_issues", ""):
-                sess["phase2"]["grammar_issues"] = val
-                on_dirty()
-
-        with col_g2:
-            st.write("")
-            st.write("")
-            just_streamed = False
-            if st.button(
-                "🤖 Ask AI to Explain",
-                help="Get explanation for the text above",
-            ):
-                if not p2.get("grammar_issues", "").strip():
-                    st.warning("Please enter some text to analyze first.")
-                else:
-                    st.markdown(f"**🤖 AI Explanation ({ai_model_name}):**")
-                    streamed = st.write_stream(
-                        stream_ai_explanation(
-                            p2.get("grammar_issues"),
-                            ai_provider,
-                            selected_model_id,
-                            context=sess.get("video_transcript", ""),
-                        )
-                    )
-                    st.session_state["ai_explanation"] = streamed
-                    just_streamed = True
-
-        if "ai_explanation" in st.session_state and not just_streamed:
-            st.info(
-                f"**🤖 AI Explanation ({ai_model_name}):**\n\n"
-                f"{st.session_state['ai_explanation']}"
-            )
-            if st.button("Clear Explanation", key="clear_ai"):
-                del st.session_state["ai_explanation"]
-                st.rerun()
-
-    # Linking — freeform 유지 (LLM 음성 분석 한계)
-    with st.expander(
-        "🔊 Linking & Pronunciation (Sound)",
-        expanded=bool(p2.get("linking_issues")),
-    ):
-        val = st.text_area(
-            "Write down sounds you couldn't catch:",
-            value=p2.get("linking_issues", ""),
-            height=150,
-            help=TIPS["p2_step5_linking"],
-            key="input_linking_issues",
-        )
-        if val != p2.get("linking_issues", ""):
-            sess["phase2"]["linking_issues"] = val
-            on_dirty()
-
     # General notes
     st.write("")
     val = st.text_area(
@@ -226,22 +160,34 @@ def render_phase2(
         sess["phase2"]["notes"] = val
         on_dirty()
 
-    # Legacy notes — 기존 vocab_issues / linking_issues 보존 (읽기 전용)
-    legacy_vocab = p2.get("vocab_issues", "")
-    if legacy_vocab.strip():
+    # Legacy notes — 기존 freeform 입력(vocab/grammar/linking)을 읽기 전용으로 보존.
+    # Step 5가 Quick Capture 단일 흐름으로 단순화되면서 이전 누적 데이터를 안전하게 노출.
+    _LEGACY_FIELDS = (
+        ("vocab_issues", "📄 이전 Vocab 메모"),
+        ("grammar_issues", "📐 이전 Grammar 메모"),
+        ("linking_issues", "🔊 이전 Linking 메모"),
+    )
+    has_any_legacy = any(p2.get(k, "").strip() for k, _ in _LEGACY_FIELDS)
+    if has_any_legacy:
         with st.expander(
-            "📜 Legacy Vocab Notes (이전 freeform 기록)", expanded=False
+            "📜 Legacy Notes (이전 freeform 기록 — 참고용)", expanded=False
         ):
-            st.text_area(
-                "Read-only legacy vocabulary notes",
-                value=legacy_vocab,
-                height=120,
-                disabled=True,
-                key="legacy_vocab_view",
-                label_visibility="collapsed",
-            )
+            for field_key, label in _LEGACY_FIELDS:
+                content = p2.get(field_key, "")
+                if not content.strip():
+                    continue
+                st.markdown(f"**{label}**")
+                st.text_area(
+                    label,
+                    value=content,
+                    height=120,
+                    disabled=True,
+                    key=f"legacy_{field_key}_view",
+                    label_visibility="collapsed",
+                )
             st.caption(
-                "다음 이터레이션에서 일괄 마이그레이션 예정 — 지금은 참고용."
+                "Step 5는 Quick Capture로 단순화됐습니다. 위 내용은 이전 기록 보존용이며 "
+                "다음 이터레이션에서 일괄 마이그레이션 예정입니다."
             )
 
     st.divider()
