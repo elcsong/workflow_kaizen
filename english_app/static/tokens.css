@@ -15,6 +15,33 @@
   --color-text: #18181B;
   --color-text-muted: #6B7280;
   --color-text-inverse: #FFFFFF;
+}
+
+/* 다크 모드 대응 — Streamlit 다크 테마 또는 OS 다크 모드에서 자동 적용 */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #0E1117;
+    --color-surface: #1E2329;
+    --color-surface-muted: #262B33;
+    --color-border: #3A3F47;
+    --color-border-strong: #4A4F57;
+    --color-text: #FAFAFA;
+    --color-text-muted: #A1A1AA;
+  }
+}
+
+/* Streamlit이 명시적으로 다크 테마 클래스를 다는 경우도 커버 */
+[data-theme="dark"] {
+  --color-bg: #0E1117;
+  --color-surface: #1E2329;
+  --color-surface-muted: #262B33;
+  --color-border: #3A3F47;
+  --color-border-strong: #4A4F57;
+  --color-text: #FAFAFA;
+  --color-text-muted: #A1A1AA;
+}
+
+:root {
 
   --color-accent: #EF4444;          /* YouTube red */
   --color-accent-soft: #FEE2E2;
@@ -119,12 +146,14 @@
 }
 
 /* ===== Flash Card ===== */
+/* color: inherit → Streamlit이 테마(라이트/다크)에 따라 적용한 본문 색을 그대로 사용.
+   CSS 변수 fallback이 실패해도 항상 가독성 유지. */
 .ek-flashcard-front {
   font-size: 2.25rem;
   font-weight: 700;
   text-align: center;
   padding: var(--space-8) var(--space-4);
-  color: var(--color-text);
+  color: inherit;
   letter-spacing: -0.01em;
   line-height: 1.2;
 }
