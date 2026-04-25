@@ -16,6 +16,7 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from session_manager import SessionManager
 from llm_helper import (
     MODELS,
+    extract_knowledge_entry,
     get_ai_explanation,
     stream_ai_explanation,
     stream_ai_summary_critique,
@@ -280,6 +281,7 @@ elif st.session_state.page == "learning":
             selected_model_id=selected_model_id,
             stream_ai_explanation=stream_ai_explanation,
             transcript_api=YouTubeTranscriptApi,
+            extract_knowledge_entry=extract_knowledge_entry,
         )
 
     # --- Tab 3: Shadowing & Utilization (Steps 7-10) ---

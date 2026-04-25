@@ -40,6 +40,22 @@ class Phase3Data:
 
 
 @dataclass(frozen=True)
+class ExtractedEntry:
+    """Step 5 Quick Capture — AI가 분류·분석한 한 항목.
+
+    `bank`: 'vocabulary' | 'grammar'
+    `quote`: 원본 transcript에서 발췌한 문장 (없으면 빈 문자열)
+    """
+
+    bank: str
+    word_or_pattern: str
+    meaning: str = ""
+    quote: str = ""
+    example: str = ""
+    note: str = ""
+
+
+@dataclass(frozen=True)
 class SessionSchema:
     """학습 세션의 구조화 스냅샷. 저장/로드 경계에서 사용."""
 

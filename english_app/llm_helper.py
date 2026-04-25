@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 from typing import Iterator
 
+from english_app.models import ExtractedEntry
+from english_app.services.knowledge_extractor import parse_extractor_response
 from english_app.services.llm.base import ProviderUnavailable
 from english_app.services.llm.registry import build_registry
 
@@ -179,4 +181,82 @@ def stream_ai_summary_critique(
             "Provider %s 종료 사유 비정상: %s — 응답이 잘렸을 수 있음",
             provider,
             finish,
+        )
+
+
+def build_extract_prompt(user_input: str, transcript: str) -> str:
+    """Step 5 Quick Capture 프롬프트 — JSON 단일 객체 반환을 강제."""
+    transcript_window = (transcript or "")[:6000] or "(자막 없음)"
+    return (
+        "You are a vocabulary/grammar capture assistant for an English learner "
+        "studying TED talks. The learner has captured a fragment they didn't "
+        "understand. Your job: classify, look it up in the transcript, and "
+        "provide a learner-friendly summary.\n\n"
+        "Return EXACTLY one JSON object (no markdown fences, no extra prose) "
+        "with these fields:\n"
+        "{\n"
+        "  \"bank\": \"vocabulary\" | \"grammar\",\n"
+        "  \"word_or_pattern\": \"<the term as it should appear in the bank>\",\n"
+        "  \"meaning\": \"<Korean explanation, concise>\",\n"
+        "  \"quote\": \"<exact transcript sentence containing the term, "
+        "or empty string if not found>\",\n"
+        "  \"example\": \"<one fresh example sentence in English>\",\n"
+        "  \"note\": \"<1-2 line learning tip in Korean>\"\n"
+        "}\n\n"
+        "Rules:\n"
+        "- 'vocabulary' = single words or fixed collocations.\n"
+        "- 'grammar' = sentence patterns or constructions (e.g., 'not only X "
+        "but also Y', 'had I known').\n"
+        "- 'quote' MUST be an exact substring from the transcript when found; "
+        "otherwise empty string.\n"
+        "- Korean for meaning/note. English for example.\n"
+        "- Output JSON only.\n\n"
+        f"<transcript>\n{transcript_window}\n</transcript>\n\n"
+        f"<learner_input>\n{user_input.strip()}\n</learner_input>\n"
+    )
+
+
+def extract_knowledge_entry(
+    user_input: str,
+    transcript: str,
+    provider: str,
+    model_name: str,
+) -> ExtractedEntry:
+    """Step 5 Quick Capture — Provider 호출 + JSON 응답 파싱.
+
+    스트리밍 호출의 청크를 모두 모아 단일 문자열로 만든 뒤
+    `parse_extractor_response()` 로 검증·파싱.
+    실패 시에도 사용자가 fallback할 수 있도록 의미 있는 ExtractedEntry 반환
+    (note에 에러 메시지 노출).
+    """
+    llm = _REGISTRY.get(provider)
+    if llm is None:
+        return ExtractedEntry(
+            bank="vocabulary",
+            word_or_pattern=user_input.strip(),
+            meaning="",
+            note=f"Error: Unknown provider '{provider}'",
+        )
+
+    prompt = build_extract_prompt(user_input, transcript)
+    try:
+        chunks = list(llm.stream(prompt, model_name))
+    except ProviderUnavailable as exc:
+        return ExtractedEntry(
+            bank="vocabulary",
+            word_or_pattern=user_input.strip(),
+            meaning="",
+            note=f"Error: {exc}",
+        )
+
+    raw = "".join(chunks).strip()
+    try:
+        return parse_extractor_response(raw, transcript)
+    except ValueError as exc:
+        logger.warning("Extractor 응답 파싱 실패: %s — raw=%r", exc, raw[:200])
+        return ExtractedEntry(
+            bank="vocabulary",
+            word_or_pattern=user_input.strip(),
+            meaning="",
+            note=f"Error: 응답 파싱 실패 ({exc})",
         )

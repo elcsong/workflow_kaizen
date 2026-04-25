@@ -10,8 +10,12 @@ from typing import Any, Callable, MutableMapping
 
 import pandas as pd
 
+from english_app.services.knowledge_extractor import to_bank_row
 from english_app.services.video import extract_video_id_from_url
 from english_app.ui.tips import TIPS
+
+# Step 5 Quick Capture preview 키 — 세션 상태에 저장된 ExtractedEntry
+_QUICK_CAPTURE_PREVIEW_KEY = "step5_quick_capture_preview"
 
 
 def render_phase1(
@@ -73,6 +77,7 @@ def render_phase2(
     selected_model_id: str,
     stream_ai_explanation: Callable[..., Any],
     transcript_api,
+    extract_knowledge_entry: Callable[..., Any] | None = None,
 ) -> None:
     """Phase 2: Analysis & Learning — Step 4~6 + AI 튜터 + 단어/문법 뱅크."""
     st.subheader("Phase 2: Analysis & Learning (Steps 4-6)", help=TIPS["phase2"])
@@ -127,28 +132,26 @@ def render_phase2(
         )
 
     st.divider()
-    st.markdown("### Step 5: Error Analysis (Why did I miss it?)")
-    st.caption("Analyze your missed parts by category:")
+    st.markdown("### ⚡ Step 5: Quick Capture (Error Analysis)")
+    st.caption(
+        "모르는 단어/표현을 입력하면 AI가 본문 맥락을 찾고 자동으로 Bank로 정리합니다."
+    )
     p2 = sess["phase2"]
 
-    # Vocabulary
-    with st.expander(
-        "📄 Vocabulary Issues (Unknown Words)",
-        expanded=bool(p2.get("vocab_issues")),
-    ):
-        val = st.text_area(
-            "List unknown words & meanings:",
-            value=p2.get("vocab_issues", ""),
-            height=150,
-            help=TIPS["p2_step5_vocab"],
-            key="input_vocab_issues",
-        )
-        if val != p2.get("vocab_issues", ""):
-            sess["phase2"]["vocab_issues"] = val
-            on_dirty()
+    _render_step5_quick_capture(
+        st=st,
+        sess=sess,
+        on_dirty=on_dirty,
+        ai_provider=ai_provider,
+        ai_model_name=ai_model_name,
+        selected_model_id=selected_model_id,
+        extract_knowledge_entry=extract_knowledge_entry,
+    )
 
-    # Grammar + AI Tutor
-    with st.expander("📐 Grammar & Structure (Interpretation)", expanded=True):
+    st.divider()
+
+    # Grammar AI Tutor — 긴 문장 심화 분석은 별도 유지
+    with st.expander("📐 Grammar Deep Dive (긴 문장 심화 분석)", expanded=False):
         col_g1, col_g2 = st.columns([3, 1])
         with col_g1:
             val = st.text_area(
@@ -194,7 +197,7 @@ def render_phase2(
                 del st.session_state["ai_explanation"]
                 st.rerun()
 
-    # Linking
+    # Linking — freeform 유지 (LLM 음성 분석 한계)
     with st.expander(
         "🔊 Linking & Pronunciation (Sound)",
         expanded=bool(p2.get("linking_issues")),
@@ -222,6 +225,24 @@ def render_phase2(
     if val != p2.get("notes", ""):
         sess["phase2"]["notes"] = val
         on_dirty()
+
+    # Legacy notes — 기존 vocab_issues / linking_issues 보존 (읽기 전용)
+    legacy_vocab = p2.get("vocab_issues", "")
+    if legacy_vocab.strip():
+        with st.expander(
+            "📜 Legacy Vocab Notes (이전 freeform 기록)", expanded=False
+        ):
+            st.text_area(
+                "Read-only legacy vocabulary notes",
+                value=legacy_vocab,
+                height=120,
+                disabled=True,
+                key="legacy_vocab_view",
+                label_visibility="collapsed",
+            )
+            st.caption(
+                "다음 이터레이션에서 일괄 마이그레이션 예정 — 지금은 참고용."
+            )
 
     st.divider()
     st.subheader("📚 Personal Knowledge Bank")
@@ -383,3 +404,140 @@ def render_phase3(
                     if st.button("Clear Critique", key="clear_p3_critique"):
                         del st.session_state["p3_critique"]
                         st.rerun()
+
+
+def _render_step5_quick_capture(
+    *,
+    st,
+    sess: MutableMapping,
+    on_dirty: Callable[[], None],
+    ai_provider: str,
+    ai_model_name: str,
+    selected_model_id: str,
+    extract_knowledge_entry: Callable[..., Any] | None,
+) -> None:
+    """Step 5 Quick Capture — 입력→AI 분석→Preview 카드→Bank 저장."""
+    transcript_text = sess.get("video_transcript", "")
+    extractor_ready = (
+        extract_knowledge_entry is not None
+        and ai_provider
+        and selected_model_id
+    )
+
+    user_input = st.text_input(
+        "모르는 단어 또는 표현",
+        placeholder="예: neurobiological / not only X but also Y",
+        key="step5_capture_input",
+    )
+
+    capture_clicked = st.button(
+        "🤖 분석 & 정리",
+        type="primary",
+        disabled=not extractor_ready or not user_input.strip(),
+        help=(
+            None if extractor_ready
+            else "AI 추출기가 연결되지 않았습니다 — Provider 설정을 확인하세요"
+        ),
+    )
+
+    if capture_clicked and extractor_ready and user_input.strip():
+        with st.spinner(f"본문에서 맥락 찾는 중... ({ai_model_name})"):
+            entry = extract_knowledge_entry(
+                user_input=user_input,
+                transcript=transcript_text,
+                provider=ai_provider,
+                model_name=selected_model_id,
+            )
+        # ExtractedEntry는 frozen dataclass — dict로 변환해 세션에 저장
+        st.session_state[_QUICK_CAPTURE_PREVIEW_KEY] = {
+            "bank": entry.bank,
+            "word_or_pattern": entry.word_or_pattern,
+            "meaning": entry.meaning,
+            "quote": entry.quote,
+            "example": entry.example,
+            "note": entry.note,
+        }
+        st.rerun()
+
+    preview = st.session_state.get(_QUICK_CAPTURE_PREVIEW_KEY)
+    if not preview:
+        return
+
+    with st.container(border=True):
+        st.markdown("**📋 분석 결과 (Preview)**")
+        bank_label = st.selectbox(
+            "분류",
+            options=["Vocabulary", "Grammar"],
+            index=0 if preview.get("bank") == "vocabulary" else 1,
+            key="step5_preview_bank",
+        )
+        new_bank = "vocabulary" if bank_label == "Vocabulary" else "grammar"
+
+        if preview.get("quote"):
+            st.markdown(f"📍 **본문 위치**")
+            st.info(preview["quote"])
+        else:
+            st.caption("📍 본문에서 정확한 위치를 찾지 못했습니다.")
+
+        edited_word = st.text_input(
+            "Word / Pattern",
+            value=preview.get("word_or_pattern", ""),
+            key="step5_preview_word",
+        )
+        edited_meaning = st.text_input(
+            "📖 뜻 (Meaning)",
+            value=preview.get("meaning", ""),
+            key="step5_preview_meaning",
+        )
+        edited_example = st.text_area(
+            "💡 예시 (Example)",
+            value=preview.get("example", ""),
+            height=68,
+            key="step5_preview_example",
+        )
+        edited_note = st.text_area(
+            "📝 메모 (Note)",
+            value=preview.get("note", ""),
+            height=68,
+            key="step5_preview_note",
+        )
+
+        c_save, c_discard = st.columns([1, 1])
+        with c_save:
+            if st.button(
+                "✅ Bank에 저장", type="primary", use_container_width=True,
+                key="step5_preview_save",
+            ):
+                from english_app.models import ExtractedEntry
+                final = ExtractedEntry(
+                    bank=new_bank,
+                    word_or_pattern=edited_word.strip(),
+                    meaning=edited_meaning.strip(),
+                    quote=preview.get("quote", ""),
+                    example=edited_example.strip(),
+                    note=edited_note.strip(),
+                )
+                row = to_bank_row(final)
+                # ✨ 마커 — AI 자동 추가 항목 표식
+                row["✨"] = "🤖"
+                if final.bank == "vocabulary":
+                    sess["phase2"].setdefault("vocab_list", [])
+                    sess["phase2"]["vocab_list"] = list(sess["phase2"]["vocab_list"]) + [row]
+                else:
+                    sess["phase2"].setdefault("grammar_list", [])
+                    sess["phase2"]["grammar_list"] = list(sess["phase2"]["grammar_list"]) + [row]
+                on_dirty()
+                st.session_state.pop(_QUICK_CAPTURE_PREVIEW_KEY, None)
+                # 입력창 비우기
+                st.session_state["step5_capture_input"] = ""
+                st.toast(
+                    f"✅ {bank_label} Bank에 저장됨", icon="📚",
+                )
+                st.rerun()
+        with c_discard:
+            if st.button(
+                "🗑️ 폐기", use_container_width=True,
+                key="step5_preview_discard",
+            ):
+                st.session_state.pop(_QUICK_CAPTURE_PREVIEW_KEY, None)
+                st.rerun()
