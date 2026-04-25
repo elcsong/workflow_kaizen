@@ -280,76 +280,77 @@ def render_phase3(
         "* **Step 8: Shadowing** (21:35) - Mimic intonation/speed (No input needed)."
     )
 
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("### 🎙️ Step 9: Recording", help=TIPS["p3_step9"])
-        audio_val = st.audio_input("Record Shadowing/Summary")
-        if audio_val:
-            st.audio(audio_val)
-            if st.button("Save Recording"):
-                bytes_data = audio_val.read()
-                fname = save_audio(sess["id"], bytes_data)
-                sess["phase3"]["audio_file"] = fname
-                st.success("Saved!")
-                on_dirty()
-        saved = sess["phase3"].get("audio_file")
-        if saved:
-            st.info(f"Saved: {saved}")
-            path = os.path.join(audio_dir, saved)
-            if os.path.exists(path):
-                st.audio(path)
-
-    with c2:
-        st.markdown("### ✍️ Step 10: Output", help=TIPS["p3_step10"])
-        val = st.text_area(
-            "Summary (Your Own Words):",
-            value=sess["phase3"].get("summary", ""),
-            height=300,
-            key="p3_summary_output",
-        )
-        if val != sess["phase3"].get("summary", ""):
-            sess["phase3"]["summary"] = val
+    # Step 9: Recording (Row 1)
+    st.markdown("### 🎙️ Step 9: Recording", help=TIPS["p3_step9"])
+    audio_val = st.audio_input("Record Shadowing/Summary")
+    if audio_val:
+        st.audio(audio_val)
+        if st.button("Save Recording"):
+            bytes_data = audio_val.read()
+            fname = save_audio(sess["id"], bytes_data)
+            sess["phase3"]["audio_file"] = fname
+            st.success("Saved!")
             on_dirty()
+    saved = sess["phase3"].get("audio_file")
+    if saved:
+        st.info(f"Saved: {saved}")
+        path = os.path.join(audio_dir, saved)
+        if os.path.exists(path):
+            st.audio(path)
 
-        # Step 10 AI 첨삭 — 원문 transcript와 사용자 요약 비교
-        if stream_summary_critique is not None and ai_provider and selected_model_id:
-            transcript_text = sess.get("video_transcript", "")
-            critique_disabled = not val.strip() or not transcript_text
-            help_msg = None
-            if not val.strip():
-                help_msg = "요약을 먼저 작성해 주세요."
-            elif not transcript_text:
-                help_msg = "원문 transcript가 없으면 첨삭이 어렵습니다 (자막 없는 영상)."
+    st.divider()
 
-            just_critiqued = False
-            if st.button(
-                "🤖 첨삭 받기 (Compare with Source)",
-                help=help_msg or "원문과 비교해 첨삭 결과를 받습니다",
-                disabled=critique_disabled,
+    # Step 10: Output (Row 2)
+    st.markdown("### ✍️ Step 10: Output", help=TIPS["p3_step10"])
+    val = st.text_area(
+        "Summary (Your Own Words):",
+        value=sess["phase3"].get("summary", ""),
+        height=300,
+        key="p3_summary_output",
+    )
+    if val != sess["phase3"].get("summary", ""):
+        sess["phase3"]["summary"] = val
+        on_dirty()
+
+    # Step 10 AI 첨삭 — 원문 transcript와 사용자 요약 비교
+    if stream_summary_critique is not None and ai_provider and selected_model_id:
+        transcript_text = sess.get("video_transcript", "")
+        critique_disabled = not val.strip() or not transcript_text
+        help_msg = None
+        if not val.strip():
+            help_msg = "요약을 먼저 작성해 주세요."
+        elif not transcript_text:
+            help_msg = "원문 transcript가 없으면 첨삭이 어렵습니다 (자막 없는 영상)."
+
+        just_critiqued = False
+        if st.button(
+            "🤖 첨삭 받기 (Compare with Source)",
+            help=help_msg or "원문과 비교해 첨삭 결과를 받습니다",
+            disabled=critique_disabled,
+        ):
+            st.markdown(
+                f"**🤖 Step 10 첨삭 ({ai_model_name}):**"
+            )
+            streamed = st.write_stream(
+                stream_summary_critique(
+                    val,
+                    transcript_text,
+                    ai_provider,
+                    selected_model_id,
+                )
+            )
+            st.session_state["p3_critique"] = streamed
+            just_critiqued = True
+
+        if "p3_critique" in st.session_state and not just_critiqued:
+            with st.expander(
+                f"📋 이전 첨삭 결과 ({ai_model_name})",
+                expanded=True,
             ):
-                st.markdown(
-                    f"**🤖 Step 10 첨삭 ({ai_model_name}):**"
-                )
-                streamed = st.write_stream(
-                    stream_summary_critique(
-                        val,
-                        transcript_text,
-                        ai_provider,
-                        selected_model_id,
-                    )
-                )
-                st.session_state["p3_critique"] = streamed
-                just_critiqued = True
-
-            if "p3_critique" in st.session_state and not just_critiqued:
-                with st.expander(
-                    f"📋 이전 첨삭 결과 ({ai_model_name})",
-                    expanded=True,
-                ):
-                    st.markdown(st.session_state["p3_critique"])
-                    if st.button("Clear Critique", key="clear_p3_critique"):
-                        del st.session_state["p3_critique"]
-                        st.rerun()
+                st.markdown(st.session_state["p3_critique"])
+                if st.button("Clear Critique", key="clear_p3_critique"):
+                    del st.session_state["p3_critique"]
+                    st.rerun()
 
 
 def _render_step5_quick_capture(
