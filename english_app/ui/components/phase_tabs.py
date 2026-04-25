@@ -297,8 +297,16 @@ def render_phase3(
     on_dirty: Callable[[], None],
     save_audio: Callable[[str, bytes], str],
     audio_dir: str,
+    ai_provider: str | None = None,
+    ai_model_name: str | None = None,
+    selected_model_id: str | None = None,
+    stream_summary_critique: Callable[..., Any] | None = None,
 ) -> None:
-    """Phase 3: Shadowing & Output — Step 7~10."""
+    """Phase 3: Shadowing & Output — Step 7~10.
+
+    AI 인자(ai_provider, selected_model_id, stream_summary_critique)가 전달되면
+    Step 10에 "🤖 첨삭 받기" 버튼을 표출. 인자 미제공 시 비활성.
+    """
     st.subheader("Phase 3: Shadowing & Utilization (Steps 7-10)", help=TIPS["phase3"])
     st.markdown(
         "* **Step 7: Review** (21:23) - Final review of missed parts.\n"
@@ -335,3 +343,43 @@ def render_phase3(
         if val != sess["phase3"].get("summary", ""):
             sess["phase3"]["summary"] = val
             on_dirty()
+
+        # Step 10 AI 첨삭 — 원문 transcript와 사용자 요약 비교
+        if stream_summary_critique is not None and ai_provider and selected_model_id:
+            transcript_text = sess.get("video_transcript", "")
+            critique_disabled = not val.strip() or not transcript_text
+            help_msg = None
+            if not val.strip():
+                help_msg = "요약을 먼저 작성해 주세요."
+            elif not transcript_text:
+                help_msg = "원문 transcript가 없으면 첨삭이 어렵습니다 (자막 없는 영상)."
+
+            just_critiqued = False
+            if st.button(
+                "🤖 첨삭 받기 (Compare with Source)",
+                help=help_msg or "원문과 비교해 첨삭 결과를 받습니다",
+                disabled=critique_disabled,
+            ):
+                st.markdown(
+                    f"**🤖 Step 10 첨삭 ({ai_model_name}):**"
+                )
+                streamed = st.write_stream(
+                    stream_summary_critique(
+                        val,
+                        transcript_text,
+                        ai_provider,
+                        selected_model_id,
+                    )
+                )
+                st.session_state["p3_critique"] = streamed
+                just_critiqued = True
+
+            if "p3_critique" in st.session_state and not just_critiqued:
+                with st.expander(
+                    f"📋 이전 첨삭 결과 ({ai_model_name})",
+                    expanded=True,
+                ):
+                    st.markdown(st.session_state["p3_critique"])
+                    if st.button("Clear Critique", key="clear_p3_critique"):
+                        del st.session_state["p3_critique"]
+                        st.rerun()

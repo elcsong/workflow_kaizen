@@ -111,3 +111,72 @@ def _build_prompt(text: str) -> str:
         "Respond in Korean. Use Markdown with headings, bolding, and lists.\n\n"
         f"Text to analyze:\n{text}"
     )
+
+
+def build_summary_critique_prompt(summary: str, transcript: str) -> str:
+    """Step 10 요약 첨삭용 프롬프트.
+
+    - 사용자 요약과 원문 transcript를 비교
+    - 정확히 포착한 부분 / 놓친 핵심 / 잘못 해석한 부분 / 개선 제안
+    - 마지막에 점수와 한 줄 평
+    """
+    return (
+        "You are a Senior English Composition Coach helping a learner who has "
+        "just finished a 6-Step TED listening study cycle. Their final task "
+        "(Step 10) is to summarize the talk in their own words.\n\n"
+        "## Your Goal\n"
+        "Compare the learner's summary against the original transcript, then "
+        "provide actionable, encouraging feedback (첨삭).\n\n"
+        "## Mandatory Output Sections (in this order)\n"
+        "### 1. ✅ 정확히 포착한 점 (What they captured well)\n"
+        "List 2-3 specific points the learner correctly identified, citing the "
+        "matching transcript phrase if useful.\n\n"
+        "### 2. ⚠️ 놓친 핵심 (Missed key points)\n"
+        "Identify up to 3 important ideas from the transcript that are missing or "
+        "underdeveloped in the summary. Quote the relevant transcript line.\n\n"
+        "### 3. ✏️ 표현·문법 첨삭 (Expression & grammar corrections)\n"
+        "Suggest improvements to specific sentences in the summary. Use this format:\n"
+        "- 원문: <user sentence>\n"
+        "- 수정: <improved sentence>\n"
+        "- 이유: <why>\n\n"
+        "### 4. 🎯 점수 & 한 줄 총평 (Score & one-line assessment)\n"
+        "Score the summary out of 100 across three axes: 내용 정확도, 핵심 포착, "
+        "표현 자연스러움. Conclude with one sentence of encouragement.\n\n"
+        "## Style\n"
+        "- Respond in **Korean** (Markdown with the section headings above).\n"
+        "- Be specific, cite transcript evidence, avoid generic praise.\n"
+        "- If the summary is empty or far too short, say so plainly and ask the "
+        "learner to write at least 3-5 sentences first.\n\n"
+        "## Inputs\n\n"
+        "<transcript>\n"
+        f"{(transcript or '(자막 없음)')[:6000]}\n"
+        "</transcript>\n\n"
+        "<learner_summary>\n"
+        f"{summary or '(빈 요약)'}\n"
+        "</learner_summary>\n"
+    )
+
+
+def stream_ai_summary_critique(
+    summary: str,
+    transcript: str,
+    provider: str,
+    model_name: str,
+) -> Iterator[str]:
+    """Step 10 요약 첨삭 스트리밍."""
+    llm = _REGISTRY.get(provider)
+    if llm is None:
+        yield f"Error: Unknown provider '{provider}'"
+        return
+    prompt = build_summary_critique_prompt(summary, transcript)
+    try:
+        yield from llm.stream(prompt, model_name)
+    except ProviderUnavailable as exc:
+        yield f"Error: {exc}"
+    finish = llm.get_last_finish_reason()
+    if finish and finish not in {"end_turn", "stop", "stop_sequence"}:
+        logger.warning(
+            "Provider %s 종료 사유 비정상: %s — 응답이 잘렸을 수 있음",
+            provider,
+            finish,
+        )

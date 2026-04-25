@@ -14,7 +14,12 @@ import streamlit.components.v1 as components
 import pandas as pd
 from youtube_transcript_api import YouTubeTranscriptApi
 from session_manager import SessionManager
-from llm_helper import get_ai_explanation, stream_ai_explanation, MODELS
+from llm_helper import (
+    MODELS,
+    get_ai_explanation,
+    stream_ai_explanation,
+    stream_ai_summary_critique,
+)
 
 from english_app.services import session_store
 from english_app.services.autosave import should_autosave
@@ -285,4 +290,8 @@ elif st.session_state.page == "learning":
             on_dirty=mark_dirty,
             save_audio=st.session_state.manager.save_audio,
             audio_dir=os.path.join(_APP_DIR, "data", "audio"),
+            ai_provider=ai_provider,
+            ai_model_name=ai_model_name,
+            selected_model_id=selected_model_id,
+            stream_summary_critique=stream_ai_summary_critique,
         )
