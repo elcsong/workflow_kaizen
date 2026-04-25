@@ -424,10 +424,15 @@ def _render_step5_quick_capture(
         and selected_model_id
     )
 
+    # 카운터 기반 동적 key — 저장 시 카운터 증가로 입력 위젯 리셋
+    # (Streamlit이 위젯 인스턴스화 후 session_state[key] 직접 수정 금지하므로)
+    st.session_state.setdefault("step5_capture_counter", 0)
+    input_key = f"step5_capture_input_{st.session_state.step5_capture_counter}"
+
     user_input = st.text_input(
         "모르는 단어 또는 표현",
         placeholder="예: neurobiological / not only X but also Y",
-        key="step5_capture_input",
+        key=input_key,
     )
 
     capture_clicked = st.button(
@@ -528,8 +533,8 @@ def _render_step5_quick_capture(
                     sess["phase2"]["grammar_list"] = list(sess["phase2"]["grammar_list"]) + [row]
                 on_dirty()
                 st.session_state.pop(_QUICK_CAPTURE_PREVIEW_KEY, None)
-                # 입력창 비우기
-                st.session_state["step5_capture_input"] = ""
+                # 입력창 리셋 — 카운터 증가로 다음 rerun에서 새 위젯 인스턴스 생성
+                st.session_state.step5_capture_counter += 1
                 st.toast(
                     f"✅ {bank_label} Bank에 저장됨", icon="📚",
                 )
