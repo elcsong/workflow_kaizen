@@ -62,3 +62,10 @@ config.ini  # If sensitive
 # Data folders
 data/
 
+# Project-specific virtualenv
+kaizen-venv/
+
+# Test coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
