@@ -204,6 +204,10 @@ def render_phase2(
         )
         if "My Note" not in initial_vocab_df.columns:
             initial_vocab_df["My Note"] = ""
+        _vocab_cols = ["Word", "Meaning", "Example", "My Note"]
+        if "✨" in initial_vocab_df.columns:
+            _vocab_cols.append("✨")
+        initial_vocab_df = initial_vocab_df.reindex(columns=_vocab_cols, fill_value="")
         edited = st.data_editor(
             initial_vocab_df,
             num_rows="dynamic",
@@ -213,6 +217,7 @@ def render_phase2(
                 "Meaning": st.column_config.TextColumn("Meaning", width="medium"),
                 "Example": st.column_config.TextColumn("Example", width="large"),
                 "My Note": st.column_config.TextColumn("My Note", width="medium"),
+                "✨": st.column_config.TextColumn("✨", width="small"),
             },
             key=f"vocab_editor_{sess['id']}",
         )
@@ -236,6 +241,10 @@ def render_phase2(
         )
         if "Example" not in initial_grammar_df.columns:
             initial_grammar_df["Example"] = ""
+        _grammar_cols = ["Sentence/Pattern", "Grammar Point", "Example", "My Note"]
+        if "✨" in initial_grammar_df.columns:
+            _grammar_cols.append("✨")
+        initial_grammar_df = initial_grammar_df.reindex(columns=_grammar_cols, fill_value="")
         edited = st.data_editor(
             initial_grammar_df,
             num_rows="dynamic",
@@ -249,6 +258,7 @@ def render_phase2(
                 ),
                 "Example": st.column_config.TextColumn("Example", width="large"),
                 "My Note": st.column_config.TextColumn("My Note", width="medium"),
+                "✨": st.column_config.TextColumn("✨", width="small"),
             },
             key=f"grammar_editor_{sess['id']}",
         )
