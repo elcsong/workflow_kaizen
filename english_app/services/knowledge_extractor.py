@@ -72,11 +72,13 @@ def to_bank_row(entry: ExtractedEntry) -> dict:
         return {
             "Sentence/Pattern": entry.word_or_pattern,
             "Grammar Point": entry.meaning,
-            "My Note": entry.note or entry.example,
+            "Example": entry.example,
+            "My Note": entry.note,
         }
     # vocabulary (default)
     return {
         "Word": entry.word_or_pattern,
         "Meaning": entry.meaning,
         "Example": entry.example,
+        "My Note": entry.note,
     }

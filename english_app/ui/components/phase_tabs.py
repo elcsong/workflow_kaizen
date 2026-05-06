@@ -200,8 +200,10 @@ def render_phase2(
         initial_vocab_df = (
             pd.DataFrame(current_vocab)
             if current_vocab
-            else pd.DataFrame(columns=["Word", "Meaning", "Example"])
+            else pd.DataFrame(columns=["Word", "Meaning", "Example", "My Note"])
         )
+        if "My Note" not in initial_vocab_df.columns:
+            initial_vocab_df["My Note"] = ""
         edited = st.data_editor(
             initial_vocab_df,
             num_rows="dynamic",
@@ -210,6 +212,7 @@ def render_phase2(
                 "Word": st.column_config.TextColumn("Word", width="small"),
                 "Meaning": st.column_config.TextColumn("Meaning", width="medium"),
                 "Example": st.column_config.TextColumn("Example", width="large"),
+                "My Note": st.column_config.TextColumn("My Note", width="medium"),
             },
             key=f"vocab_editor_{sess['id']}",
         )
@@ -229,8 +232,10 @@ def render_phase2(
         initial_grammar_df = (
             pd.DataFrame(current_grammar)
             if current_grammar
-            else pd.DataFrame(columns=["Sentence/Pattern", "Grammar Point", "My Note"])
+            else pd.DataFrame(columns=["Sentence/Pattern", "Grammar Point", "Example", "My Note"])
         )
+        if "Example" not in initial_grammar_df.columns:
+            initial_grammar_df["Example"] = ""
         edited = st.data_editor(
             initial_grammar_df,
             num_rows="dynamic",
@@ -242,7 +247,8 @@ def render_phase2(
                 "Grammar Point": st.column_config.TextColumn(
                     "Grammar Point", width="medium"
                 ),
-                "My Note": st.column_config.TextColumn("My Note", width="large"),
+                "Example": st.column_config.TextColumn("Example", width="large"),
+                "My Note": st.column_config.TextColumn("My Note", width="medium"),
             },
             key=f"grammar_editor_{sess['id']}",
         )
